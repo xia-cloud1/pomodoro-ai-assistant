@@ -1,5 +1,7 @@
 # 番茄钟 · AI 效率分析系统
 
+[![CI](https://github.com/xia-cloud1/pomodoro-ai-assistant/actions/workflows/ci.yml/badge.svg)](https://github.com/xia-cloud1/pomodoro-ai-assistant/actions)
+
 > 一个「专注计时 + 任务管理 + 数据统计 + AI 分析」的一站式效率工具。
 > 后端 Spring Boot 3 / JDK 25，前端 uni-app（Vue 3），前后端分离，可打包为 H5 / App / 小程序。
 
