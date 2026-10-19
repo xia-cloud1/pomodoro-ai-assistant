@@ -87,6 +87,7 @@
 	import { getGoal, setGoal } from '../../api/goal.js'
 	import { listTask } from '../../api/task.js'
 	import { pointsSummary } from '../../api/points.js'
+	import { clearApiCache } from '../../utils/apiCache.js'
 
 	const TOTAL_SECONDS = 25 * 60
 
@@ -284,6 +285,7 @@
 				uni.removeStorageSync('accessToken')
 				uni.removeStorageSync('refreshToken')
 				uni.removeStorageSync('user')
+				clearApiCache()
 				uni.reLaunch({ url: '/pages/login/login' })
 			}
 		}

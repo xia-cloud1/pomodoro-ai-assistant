@@ -62,6 +62,7 @@
 	import { deleteAccount, exportPersonalData } from '../../api/user.js'
 	import { getTheme, setTheme } from '../../utils/theme.js'
 	import { getLang, setLang } from '../../utils/i18n.js'
+	import { clearApiCache } from '../../utils/apiCache.js'
 
 	export default {
 		data() {
@@ -152,6 +153,7 @@
 				uni.removeStorageSync('accessToken')
 				uni.removeStorageSync('refreshToken')
 				uni.removeStorageSync('user')
+				clearApiCache()
 				uni.reLaunch({ url: '/pages/login/login' })
 			}
 		}

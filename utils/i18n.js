@@ -16,6 +16,7 @@ const messages = {
 		pleaseLogin: '请先登录',
 		loginFailed: '登录失败',
 		networkException: '网络异常，请检查服务是否启动',
+		offlineCache: '网络不可用，已显示缓存数据',
 		pointsUnit: '积分',
 		toNext: '距下一级',
 		// 专注
@@ -193,6 +194,7 @@ const messages = {
 		pleaseLogin: 'Please sign in',
 		loginFailed: 'Sign in failed',
 		networkException: 'Network error, check if the server is running',
+		offlineCache: 'Offline — showing cached data',
 		pointsUnit: 'pts',
 		toNext: 'to next level',
 		startFocus: 'Start focus',

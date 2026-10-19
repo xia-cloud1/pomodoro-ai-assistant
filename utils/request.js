@@ -1,11 +1,31 @@
 // 请求封装：统一 baseURL、token 注入、后端业务码处理
 // 后端约定：HTTP 恒为 200，业务状态在 body.code（200 成功 / 401 未登录 / 其他业务错误）
 import { t } from './i18n.js'
+import { apiCacheKey, readApiCache, writeApiCache, clearApiCache } from './apiCache.js'
 
 export const BASE_URL = 'http://localhost:8080' // H5 开发环境；App/小程序发布时改为实际后端地址
 
 // 刷新 token 进行中的 Promise，并发 401 时共用一个，避免重复刷新
 let refreshing = null
+
+// 离线提示节流：断网时首页会并发多个 GET，避免连续弹多次 toast
+let lastOfflineToastAt = 0
+
+function currentUserId() {
+	try {
+		const user = JSON.parse(uni.getStorageSync('user') || '{}')
+		return user.id || null
+	} catch (e) {
+		return null
+	}
+}
+
+function notifyOfflineCache() {
+	const now = Date.now()
+	if (now - lastOfflineToastAt < 3000) return
+	lastOfflineToastAt = now
+	uni.showToast({ title: t('offlineCache'), icon: 'none' })
+}
 
 // 直接调 uni.request 而非 api/auth.js，避免 request ↔ auth 循环依赖
 function doRefresh() {
@@ -45,6 +65,7 @@ function toLogin(message) {
 	uni.removeStorageSync('accessToken')
 	uni.removeStorageSync('refreshToken')
 	uni.removeStorageSync('user')
+	clearApiCache()
 	const pages = getCurrentPages()
 	const cur = pages.length ? pages[pages.length - 1] : null
 	if (!cur || cur.route !== 'pages/login/login') {
@@ -56,11 +77,15 @@ function toLogin(message) {
 }
 
 export function request(options, _retried) {
+	const method = (options.method || 'GET').toUpperCase()
+	// GET 默认写入离线缓存；个别接口可传 { cache: false } 关闭
+	const cacheable = method === 'GET' && options.cache !== false
+	const cacheKey = cacheable ? apiCacheKey(currentUserId(), options.url, options.data) : ''
 	return new Promise((resolve, reject) => {
 		const token = uni.getStorageSync('accessToken')
 		uni.request({
 			url: BASE_URL + options.url,
-			method: options.method || 'GET',
+			method,
 			data: options.data || {},
 			header: {
 				'Content-Type': 'application/json',
@@ -75,6 +100,7 @@ export function request(options, _retried) {
 					return
 				}
 				if (body && body.code === 200) {
+					if (cacheable) writeApiCache(cacheKey, body.data)
 					resolve(body.data)
 					return
 				}
@@ -101,6 +127,15 @@ export function request(options, _retried) {
 				reject(new Error(message))
 			},
 			fail: (err) => {
+				// 网络不可用时回退到最近一次成功的 GET 结果（如刷新后离线恢复番茄状态）
+				if (cacheable) {
+					const cached = readApiCache(cacheKey, options.cacheTtl)
+					if (cached !== null) {
+						notifyOfflineCache()
+						resolve(cached)
+						return
+					}
+				}
 				uni.showToast({ title: t('networkException'), icon: 'none' })
 				reject(err)
 			}
