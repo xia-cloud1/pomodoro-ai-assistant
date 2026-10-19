@@ -326,6 +326,16 @@ docker compose up -d --build
 
 包含 MySQL（自动执行 `sql/schema.sql`）、Redis、应用三个服务。停止：`docker compose down`；清空数据重建：`docker compose down -v`。
 
+服务器部署可直接使用 CI 构建并推送到 GHCR 的镜像，无需在服务器上编译：
+
+```bash
+cd pomodoro-server
+echo $CR_PAT | docker login ghcr.io -u <GitHub 用户名> --password-stdin
+IMAGE_TAG=latest docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --no-build
+```
+
+> GHCR 包首次推送后默认私有：可在 GitHub 仓库 → Packages → 包设置中改为 Public，或保持私有并在服务器上先 `docker login`。
+
 ### 5. 运行测试
 
 ```bash
@@ -343,7 +353,7 @@ mvn test
 2. 用 `sql/schema.sql` 初始化数据库；
 3. JDK 25 + Maven 执行全部测试（真实 MySQL + Redis，非 mock）；
 4. 打包 `pomodoro-server.jar` 并上传产物；
-5. 用 Dockerfile 构建后端镜像，验证容器化构建可用（不推送镜像）。
+5. 用 Dockerfile 构建后端镜像；push 到主分支时推送到 GHCR（`ghcr.io/xia-cloud1/pomodoro-ai-assistant`），PR 只验证构建、不推送。
 
 前端使用 HBuilderX 构建，暂无 Node 构建链，因此暂未纳入 CI。
 
@@ -380,7 +390,7 @@ mvn test
 3. **可降级架构**：Redis、DeepSeek 都是可选依赖，缺任何一个项目都能完整启动和演示，适合本地/面试环境。
 4. **真实踩坑与修复**：四舍五入导致的负时长、ThreadLocal 泄漏、软删与注销冲突、N+1、并发 401 等问题均有明确定位、修复和回归验证。
 5. **有回归保障**：13 个测试，其中 9 个是真实 Spring 上下文 + MySQL 的集成测试，覆盖认证、任务、番茄、统计、导出、数据隔离、AI 降级、限流、幂等与并发竞态。
-6. **工程化完整**：统一返回体、全局异常处理、AOP 日志、限流、幂等、定时补偿、Docker Compose 一键部署，GitHub Actions 自动跑测试 + 构建镜像。
+6. **工程化完整**：统一返回体、全局异常处理、AOP 日志、限流、幂等、定时补偿、Docker Compose 一键部署；GitHub Actions 自动跑测试、构建镜像并发布到 GHCR。
 7. **前端体验**：中英双语（响应式 i18n）、暗黑模式、H5 CSV 直接下载、SSE 流式 AI 输出；GET 接口离线缓存，断网时页面仍可展示最近数据，刷新后可恢复进行中的番茄状态。
 8. **数据隔离**：所有查询强制带 `userId`，跨用户访问返回 404；集成测试专门覆盖越权场景。
 
@@ -393,7 +403,7 @@ mvn test
 3. **统计数据预聚合**：数据量增大后，热力图/月报改为按日预聚合或加覆盖索引，避免范围扫描。
 4. **AI 能力增强**：引入向量库做个人历史数据的 RAG 检索；周报支持流式与异步任务化，避免长连接占用。
 5. **可观测性**：接入 Prometheus + Micrometer，补充慢 SQL、AI 调用耗时、限流命中率等指标。
-6. **CD 延伸**：在现有 CI 基础上，把镜像推送到 GHCR，并通过 SSH 自动部署到测试服务器（需要配置仓库 Secrets）。
+6. **自动化部署**：在 GHCR 镜像发布的基础上，通过 SSH 自动拉取镜像并重启服务（需要配置服务器地址、SSH 密钥等仓库 Secrets）。
 7. **前端工程化**：页面组件拆分、写请求失败重试/离线队列、App/小程序端适配验证。
 8. **测试完善**：补充 SSE 流式接口、统计边界（跨天、跨周、空数据）与并发场景（同时开始番茄、并发打卡）的测试。
 

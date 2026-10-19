@@ -1,0 +1,9 @@
+# 生产部署覆盖文件：直接使用 CI 推送到 GHCR 的镜像，不在服务器上构建。
+# 用法（在 pomodoro-server 目录）：
+#   echo $CR_PAT | docker login ghcr.io -u <GitHub 用户名> --password-stdin
+#   IMAGE_TAG=latest docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --no-build
+# 可选环境变量：IMAGE_TAG（默认 latest）、MYSQL_PASSWORD、JWT_SECRET、DEEPSEEK_API_KEY
+services:
+  app:
+    image: ghcr.io/xia-cloud1/pomodoro-ai-assistant:${IMAGE_TAG:-latest}
+    pull_policy: always
