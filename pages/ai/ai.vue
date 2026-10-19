@@ -34,6 +34,10 @@
 			<view v-if="askAnswer" class="answer">
 				<text class="a-title">{{ t('answer') }}</text>
 				<text class="a-body">{{ askAnswer }}</text>
+				<view v-if="askSources.length" class="sources">
+					<text class="src-title">{{ t('askSources') }}</text>
+					<text v-for="(s, i) in askSources" :key="i" class="src-item">{{ s }}</text>
+				</view>
 			</view>
 		</view>
 
@@ -86,6 +90,7 @@
 				streaming: false,
 				askQ: '',
 				askAnswer: '',
+				askSources: [],
 				asking: false,
 				splitTitle: '',
 				splitDesc: '',
@@ -151,8 +156,10 @@
 				}
 				this.asking = true
 				this.askAnswer = ''
+				this.askSources = []
 				ask(this.askQ.trim()).then((d) => {
 					this.askAnswer = d.answer || this.t('aiUnavailable')
+					this.askSources = d.sources || []
 				}).catch(() => {}).finally(() => { this.asking = false })
 			},
 			doSplit() {
@@ -277,6 +284,26 @@
 	}
 	.answer {
 		margin-top: 24rpx;
+	}
+	.sources {
+		margin-top: 20rpx;
+		padding-top: 16rpx;
+		border-top: 1rpx solid var(--border-light);
+	}
+	.src-title {
+		display: block;
+		font-size: 24rpx;
+		color: var(--text2);
+		margin-bottom: 8rpx;
+	}
+	.src-item {
+		display: inline-block;
+		font-size: 22rpx;
+		color: var(--text2);
+		background: var(--bg);
+		border-radius: 8rpx;
+		padding: 4rpx 12rpx;
+		margin: 0 10rpx 8rpx 0;
 	}
 	.subtasks {
 		margin-top: 24rpx;

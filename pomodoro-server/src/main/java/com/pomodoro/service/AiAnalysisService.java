@@ -36,7 +36,8 @@ public interface AiAnalysisService {
     MonthlyReportVO monthlyReport(Long userId, Integer year, Integer month);
 
     /**
-     * 效率问答（RAG）：检索用户近 7 天数据作上下文回答，未配置 key 时 answer 为 null
+     * 效率问答（RAG）：近 7 天概览 + 近 90 天历史记录 BM25 检索结果作上下文；
+     * sources 返回检索命中的记录引用，未配置 key 时 answer 为 null
      */
     AskVO ask(Long userId, String question);
 

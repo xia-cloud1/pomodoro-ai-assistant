@@ -2,6 +2,10 @@ package com.pomodoro.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.pomodoro.ai.DeepSeekClient;
+import com.pomodoro.ai.rag.MemoryDocument;
+import com.pomodoro.ai.rag.MemoryRetriever;
+import com.pomodoro.ai.rag.RetrievalResult;
+import com.pomodoro.ai.rag.UserMemoryBuilder;
 import com.pomodoro.entity.EnergyLog;
 import com.pomodoro.entity.PomodoroRecord;
 import com.pomodoro.entity.Task;
@@ -47,6 +51,12 @@ public class AiAnalysisServiceImpl implements AiAnalysisService {
     private static final String ASK_SYSTEM_PROMPT = "你是番茄钟效率分析助手，请仅基于提供的用户数据回答效率相关问题，数据不足时如实说明，不要编造。";
     private static final String SPLIT_SYSTEM_PROMPT = "你是任务管理助手，擅长把大任务拆分为可执行的小步骤。";
     private static final String GOLDEN_SYSTEM_PROMPT = "你是时间管理助手，请基于用户的高效时段给出简洁建议。";
+    /** RAG 检索窗口：近 90 天历史 */
+    private static final int MEMORY_DAYS = 90;
+    /** 送给模型的相关历史记录条数上限 */
+    private static final int MEMORY_TOP_K = 8;
+    /** 检索上下文最大字符数，避免提示词过长导致调用变慢/变贵 */
+    private static final int MEMORY_MAX_CHARS = 1800;
 
     private final DailyStatService dailyStatService;
     private final GoalService goalService;
@@ -56,6 +66,8 @@ public class AiAnalysisServiceImpl implements AiAnalysisService {
     private final StatService statService;
     private final DeepSeekClient deepSeekClient;
     private final ThreadPoolTaskExecutor taskExecutor;
+    private final UserMemoryBuilder userMemoryBuilder;
+    private final MemoryRetriever memoryRetriever;
 
     @Override
     public WeeklyReportVO weeklyReport(Long userId, LocalDate weekStart) {
@@ -173,11 +185,28 @@ public class AiAnalysisServiceImpl implements AiAnalysisService {
         return vo;
     }
 
+    /**
+     * 效率问答：近 7 天概览（固定）+ 近 90 天历史记录（BM25 检索，按问题取最相关的 8 条）。
+     * 检索不到相关记录时 Retriever 会回退到最近记录，保证模型仍能基于用户近况回答。
+     */
     @Override
     public AskVO ask(Long userId, String question) {
+        LocalDate today = LocalDate.now();
+        List<MemoryDocument> history = userMemoryBuilder.build(
+                userId, today.minusDays(MEMORY_DAYS - 1L), today);
+        RetrievalResult memory = memoryRetriever.retrieve(
+                history, question, today, MEMORY_TOP_K, MEMORY_MAX_CHARS);
+
+        StringBuilder context = new StringBuilder("【近 7 天概览】\n").append(buildContext(userId));
+        if (!memory.context().isEmpty()) {
+            context.append("【相关历史记录】\n").append(memory.context()).append('\n');
+        }
+
         AskVO vo = new AskVO();
         vo.setQuestion(question);
-        vo.setAnswer(deepSeekClient.chat(ASK_SYSTEM_PROMPT, "【用户数据】\n" + buildContext(userId) + "\n【用户问题】\n" + question));
+        vo.setSources(memory.documents().stream().map(MemoryDocument::citation).toList());
+        vo.setAnswer(deepSeekClient.chat(ASK_SYSTEM_PROMPT,
+                context + "【用户问题】\n" + question));
         return vo;
     }
 
