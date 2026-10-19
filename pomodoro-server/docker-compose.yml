@@ -1,0 +1,69 @@
+# 番茄钟 · AI 效率分析系统 完整部署（mysql + redis + app）
+# 用法：docker compose up -d --build   停止：docker compose down   清空数据重建：docker compose down -v
+# 可选 .env 覆盖：MYSQL_PASSWORD / JWT_SECRET / DEEPSEEK_API_KEY
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: pomodoro-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_PASSWORD:-root}
+      MYSQL_DATABASE: pomodoro
+      TZ: Asia/Shanghai
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+      # 首次初始化自动执行建库建表
+      - ./sql/schema.sql:/docker-entrypoint-initdb.d/schema.sql:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-p${MYSQL_PASSWORD:-root}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: pomodoro-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  app:
+    build: .
+    image: pomodoro-server:latest
+    container_name: pomodoro-app
+    restart: unless-stopped
+    environment:
+      MYSQL_HOST: mysql
+      MYSQL_PORT: 3306
+      MYSQL_DB: pomodoro
+      MYSQL_USER: root
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-root}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      JWT_SECRET: ${JWT_SECRET:-pomodoro-ai-efficiency-system-jwt-secret-key-please-change-me-2026}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-your-deepseek-api-key}
+      TZ: Asia/Shanghai
+    ports:
+      - "8080:8080"
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+volumes:
+  mysql-data:
+  redis-data:

@@ -1,0 +1,20 @@
+# uni-app / HBuilderX
+unpackage/
+.hbuilderx/
+
+# 后端构建产物与日志
+pomodoro-server/target/
+*.log
+
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# 本地环境与密钥
+.env
+.env.local
+
+# 系统
+.DS_Store
+Thumbs.db
