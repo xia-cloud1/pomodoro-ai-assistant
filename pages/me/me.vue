@@ -63,6 +63,7 @@
 	import { getTheme, setTheme } from '../../utils/theme.js'
 	import { getLang, setLang } from '../../utils/i18n.js'
 	import { clearApiCache } from '../../utils/apiCache.js'
+	import { clearOfflineQueueForCurrentUser } from '../../utils/request.js'
 
 	export default {
 		data() {
@@ -94,7 +95,17 @@
 				}).catch(() => {})
 			},
 			doCheckin() {
-				checkin().then(() => {
+				checkin().then((d) => {
+					if (d && d.queued) {
+						// 离线：乐观点亮今日打卡，联网后队列会自动重放
+						this.checkin = {
+							...(this.checkin || {}),
+							checkedToday: true,
+							streakDays: (this.checkin.streakDays || 0) + 1
+						}
+						uni.showToast({ title: this.t('offlineQueued'), icon: 'none' })
+						return
+					}
 					uni.showToast({ title: this.t('checkinSuccess'), icon: 'none' })
 					this.load()
 				}).catch(() => {})
@@ -102,7 +113,11 @@
 			onMakeup(e) {
 				const date = e.detail.value
 				if (!date) return
-				makeupCheckin(date).then(() => {
+				makeupCheckin(date).then((d) => {
+					if (d && d.queued) {
+						uni.showToast({ title: this.t('offlineQueued'), icon: 'none' })
+						return
+					}
 					uni.showToast({ title: this.t('makeupDone'), icon: 'none' })
 					this.load()
 				}).catch(() => {})
@@ -113,7 +128,12 @@
 					return
 				}
 				saveEnergy({ energyLevel: this.energy.energyLevel, mood: this.energy.mood })
-					.then(() => { uni.showToast({ title: this.t('saved'), icon: 'none' }) })
+					.then((d) => {
+						uni.showToast({
+							title: this.t(d && d.queued ? 'offlineQueued' : 'saved'),
+							icon: 'none'
+						})
+					})
 					.catch(() => {})
 			},
 			go(url) {
@@ -145,6 +165,8 @@
 					return
 				}
 				deleteAccount(this.deletePwd).then(() => {
+					// 账号已删除，待同步的队列不能再重放（否则只会 401）
+					clearOfflineQueueForCurrentUser()
 					uni.showToast({ title: this.t('accountDeleted'), icon: 'none' })
 					setTimeout(() => this.logout(), 800)
 				}).catch(() => {})

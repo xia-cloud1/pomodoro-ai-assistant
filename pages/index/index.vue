@@ -261,6 +261,13 @@
 				}
 				setGoal(target)
 					.then((data) => {
+						if (data && data.queued) {
+							// 离线：先用本地目标更新卡片，联网后队列重放覆盖服务端
+							this.goal = { ...(this.goal || {}), targetPomodoros: target }
+							this.showGoal = false
+							uni.showToast({ title: this.t('offlineQueued'), icon: 'none' })
+							return
+						}
 						this.goal = data
 						this.showGoal = false
 						uni.showToast({ title: this.t('saved'), icon: 'none' })

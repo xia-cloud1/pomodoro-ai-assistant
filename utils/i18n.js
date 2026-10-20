@@ -17,6 +17,8 @@ const messages = {
 		loginFailed: '登录失败',
 		networkException: '网络异常，请检查服务是否启动',
 		offlineCache: '网络不可用，已显示缓存数据',
+		offlineQueued: '网络不可用，已离线保存，联网后自动同步',
+		offlineSynced: '已同步 {n} 条离线操作',
 		pointsUnit: '积分',
 		toNext: '距下一级',
 		// 专注
@@ -196,6 +198,8 @@ const messages = {
 		loginFailed: 'Sign in failed',
 		networkException: 'Network error, check if the server is running',
 		offlineCache: 'Offline — showing cached data',
+		offlineQueued: 'Offline — saved, will sync when online',
+		offlineSynced: 'Synced {n} offline action(s)',
 		pointsUnit: 'pts',
 		toNext: 'to next level',
 		startFocus: 'Start focus',

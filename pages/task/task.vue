@@ -247,7 +247,15 @@
 			},
 			done(item) {
 				updateTask(item.id, { status: 2 })
-					.then(() => { this.load() })
+					.then((d) => {
+						if (d && d.queued) {
+							// 离线：本地先标记完成，联网后自动同步
+							item.status = 2
+							uni.showToast({ title: this.t('offlineQueued'), icon: 'none' })
+							return
+						}
+						this.load()
+					})
 					.catch(() => {})
 			},
 			remove(item) {
@@ -268,7 +276,13 @@
 			},
 			checkin(item) {
 				checkinTask(item.id)
-					.then(() => {
+					.then((d) => {
+						if (d && d.queued) {
+							// 离线：本地先累加连续次数，联网后自动同步
+							item.streakCount = (item.streakCount || 0) + 1
+							uni.showToast({ title: this.t('offlineQueued'), icon: 'none' })
+							return
+						}
 						uni.showToast({ title: this.t('taskCheckedIn'), icon: 'none' })
 						this.load()
 					})
