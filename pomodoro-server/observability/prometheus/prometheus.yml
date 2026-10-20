@@ -1,0 +1,11 @@
+# Prometheus 抓取配置（docker compose 内使用）
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: pomodoro-server
+    metrics_path: /actuator/prometheus
+    static_configs:
+      # app 为 docker-compose.yml 中的服务名，同一网络内可直接解析
+      - targets: ["app:8080"]

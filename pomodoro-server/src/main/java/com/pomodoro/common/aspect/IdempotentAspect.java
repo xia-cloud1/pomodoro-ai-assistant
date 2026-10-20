@@ -3,7 +3,9 @@ package com.pomodoro.common.aspect;
 import com.pomodoro.common.BusinessException;
 import com.pomodoro.common.ResultCode;
 import com.pomodoro.common.annotation.Idempotent;
+import com.pomodoro.observability.BusinessMetrics;
 import com.pomodoro.security.UserContext;
+import lombok.RequiredArgsConstructor;
 import org.aspectj.lang.ProceedingJoinPoint;
 import org.aspectj.lang.annotation.Around;
 import org.aspectj.lang.annotation.Aspect;
@@ -17,11 +19,13 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 @Aspect
 @Component
+@RequiredArgsConstructor
 public class IdempotentAspect {
 
     private static final long CLEAN_INTERVAL_MS = 60_000L;
     private static final long KEY_TTL_MS = 120_000L;
 
+    private final BusinessMetrics metrics;
     private final ConcurrentHashMap<String, Long> store = new ConcurrentHashMap<>();
     private volatile long lastClean = 0L;
 
@@ -34,6 +38,7 @@ public class IdempotentAspect {
 
         Long prev = store.putIfAbsent(key, now);
         if (prev != null && now - prev <= window) {
+            metrics.idempotentRejected(pjp.getSignature().getName());
             throw new BusinessException(ResultCode.CONFLICT, "请勿重复提交");
         }
         if (prev != null) {

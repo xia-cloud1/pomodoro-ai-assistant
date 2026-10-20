@@ -40,6 +40,46 @@ mybatis-plus:
 logging:
   level:
     com.pomodoro: info
+  pattern:
+    # 每条日志带上请求 traceId，便于按一次请求串联 WebLogAspect / 业务异常 / SQL 日志
+    console: "%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level [%X{traceId:-no-trace}] %-40.40logger{39} : %msg%n"
+
+# 可观测性：Actuator + Micrometer
+management:
+  endpoints:
+    web:
+      exposure:
+        # 生产环境应收紧为 health,prometheus，其余经内网/网关访问
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      show-details: always
+  health:
+    # Redis 为可选依赖（未装时 refresh token 走内存降级），
+    # 不能让它的 DOWN 把整体健康状态拖成 DOWN
+    redis:
+      enabled: false
+  info:
+    # Boot 2.6 起 info.* 默认不暴露，需显式开启
+    env:
+      enabled: true
+  metrics:
+    tags:
+      # 所有指标带应用名，方便 Prometheus 多服务区分
+      application: ${spring.application.name}
+    distribution:
+      percentiles-histogram:
+        http.server.requests: true
+  prometheus:
+    metrics:
+      export:
+        enabled: true
+
+info:
+  app:
+    name: ${spring.application.name}
+    description: 番茄钟 · AI 效率分析系统
+    version: @project.version@
 
 # JWT 配置
 jwt:

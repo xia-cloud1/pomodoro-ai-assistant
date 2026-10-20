@@ -11,6 +11,7 @@ import com.pomodoro.entity.PomodoroRecord;
 import com.pomodoro.entity.Task;
 import com.pomodoro.mapper.PomodoroRecordMapper;
 import com.pomodoro.mapper.TaskMapper;
+import com.pomodoro.observability.BusinessMetrics;
 import com.pomodoro.security.UserContext;
 import com.pomodoro.service.AchievementService;
 import com.pomodoro.service.DailyStatService;
@@ -46,6 +47,7 @@ public class PomodoroServiceImpl implements PomodoroService {
     private final DailyStatService dailyStatService;
     private final AchievementService achievementService;
     private final PointsService pointsService;
+    private final BusinessMetrics metrics;
 
     @Override
     public PomodoroVO start(PomodoroStartRequest request) {
@@ -85,6 +87,7 @@ public class PomodoroServiceImpl implements PomodoroService {
             // 会触发 1062，这里统一转换为业务 409。
             throw new BusinessException(ResultCode.CONFLICT, "已有进行中的番茄钟");
         }
+        metrics.pomodoroStarted(request.getTaskId() != null);
         return PomodoroVO.of(record);
     }
 
@@ -104,6 +107,7 @@ public class PomodoroServiceImpl implements PomodoroService {
         pointsService.addPoints(record.getUserId(), PointsService.POINTS_POMODORO,
                 PointsService.TYPE_POMODORO, record.getId(), "完成番茄");
         achievementService.checkAndUnlock(record.getUserId());
+        metrics.pomodoroCompleted(duration);
         return PomodoroVO.of(record);
     }
 
@@ -119,6 +123,7 @@ public class PomodoroServiceImpl implements PomodoroService {
         record.setInterruptReason(reason);
         pomodoroRecordMapper.updateById(record);
         dailyStatService.aggregate(record.getUserId(), record.getStartTime().toLocalDate());
+        metrics.pomodoroInterrupted();
         return PomodoroVO.of(record);
     }
 

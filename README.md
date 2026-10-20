@@ -42,6 +42,7 @@
 | 前端 | uni-app + Vue 3 | 一套代码同时支持 H5 / App / 小程序 |
 | 前端工具 | HBuilderX | 免 Node 构建链，直接运行与真机调试 |
 | 部署 | Docker 多阶段构建 + Docker Compose | 一条命令拉起 MySQL + Redis + 应用 |
+| 可观测性 | Actuator + Micrometer + Prometheus + Grafana | 健康检查、JVM/HTTP/业务指标、预置可视化面板 |
 | 测试 | JUnit 5 + MockMvc | 真实 Spring 上下文 + 数据库的集成测试 |
 
 **关键设计约定**：HTTP 状态码恒为 200，业务状态放在响应体 `code` 中（200 成功 / 400 参数错误 / 401 未登录 / 404 不存在 / 409 冲突 / 429 限流）。前端只需判断一次 `body.code`。
@@ -59,6 +60,7 @@
                            │ HTTP + JSON（Bearer Token）
 ┌──────────────────────────▼──────────────────────────────┐
 │ 接入层                                                    │
+│ TraceIdFilter（traceId → MDC + 响应头 X-Trace-Id）         │
 │ UserContextFilter（ThreadLocal 清理）                     │
 │ JwtInterceptor（登录校验 / 用户存在性校验）                │
 │ AOP：WebLogAspect 请求日志 / @RateLimit 限流              │
@@ -82,9 +84,14 @@
 └─────────────────────────────────────────────────────────┘
 
 定时任务：每天 0:30 重算昨日 daily_stat，修复聚合误差
+
+可观测性链路：
+Actuator（health / info / metrics） + Micrometer 业务埋点
+  → /actuator/prometheus（文本格式） → Prometheus 抓取 → Grafana 面板
+每条日志带 traceId（MDC），异步 SSE 任务手动传递，响应头回传 X-Trace-Id
 ```
 
-**请求链路**：前端 `request()` 注入 `Authorization: Bearer <accessToken>` → `JwtInterceptor` 解析并校验用户 → `UserContext` 保存 `userId` → Service 层所有查询强制带 `userId` 隔离 → 统一 `Result` 包装返回。
+**请求链路**：前端 `request()` 注入 `Authorization: Bearer <accessToken>` → `TraceIdFilter` 生成/沿用 traceId → `JwtInterceptor` 解析并校验用户 → `UserContext` 保存 `userId` → Service 层所有查询强制带 `userId` 隔离 → 统一 `Result` 包装返回。日志格式统一输出 `[traceId]`，前端报错时可凭响应头定位到完整请求链路。
 
 ---
 
@@ -138,7 +145,9 @@
 - 打卡接口幂等 `@Idempotent`（5 秒窗口，防双击）
 - 每日 0:30 定时重算昨日统计，兜底聚合误差
 - 前端离线缓存：成功的 GET 响应按「用户 + 接口 + 参数」缓存 7 天，断网时回退最近一次数据并提示；写请求不缓存，避免伪造成功
-- Docker Compose 一键部署（MySQL + Redis + App）
+- **可观测性**：Actuator 健康检查（DB 状态、磁盘、SSL）+ Prometheus 指标导出；自定义业务指标覆盖番茄启动/完成/中断、专注时长分布、AI 调用耗时与降级原因、限流与幂等拦截次数；每个请求生成 `traceId` 写入日志与响应头，支持沿用上游 traceId
+- **可视化**：提供 Prometheus + Grafana 编排与预置面板（QPS、P95 延迟、5xx、JVM 堆、连接池、番茄事件、AI 降级、专注时长分位数）
+- Docker Compose 一键部署（MySQL + Redis + App，可叠加可观测性套件）
 
 ---
 
@@ -238,15 +247,16 @@
 
 **方案**：项目不需要 mock 静态方法/final 类，改用子类 mock maker —— 新增 `src/test/resources/mockito-extensions/org.mockito.plugins.MockMaker`，内容为 `mock-maker-subclass`，无需任何 JVM 参数。
 
-**测试覆盖**：9 个集成用例，覆盖：
+**测试覆盖**：13 个集成用例，覆盖：
 - 认证、任务/标签/子任务/打卡；
 - 番茄主链路（完成 → 任务计数 → 周目标 → 日统计 → 积分 → 月报 → CSV）；
 - 进行中恢复与跨用户隔离；
 - **AI 全部接口在未配置 Key 时的降级返回**（结构化数据正常、AI 文本为 null）；
 - **登录限流**（同 IP 第 11 次返回 429）与**每日打卡幂等**（5 秒内重复提交被切面拦截、不同用户互不影响）；
-- **并发场景**：8 线程同时开始番茄只成功 1 个、8 线程同时打卡只产生 1 条记录和 1 次积分。
+- **并发场景**：8 线程同时开始番茄只成功 1 个、8 线程同时打卡只产生 1 条记录和 1 次积分；
+- **可观测性**：Actuator 健康/信息/Prometheus 端点、traceId 生成与上游沿用/非法值回退、番茄启停指标自增、AI 降级/限流/幂等计数。
 
-另有 6 个 RAG 检索单测（中文切词、关键词排序、时间衰减、无命中回退、字符预算、空集合）。连同 JWT 单测共 **19 个测试**通过。前 7 个用例使用 `@Transactional` 自动回滚；并发用例需要事务真实提交，因此不开启测试事务，改为独立用户 + 用例结束调用注销接口物理清理。限流/幂等的内存计数不随事务回滚，测试用「独立 IP / 独立用户」隔离，避免用例间互相污染。
+另有 6 个 RAG 检索单测（中文切词、关键词排序、时间衰减、无命中回退、字符预算、空集合）。连同 JWT 单测共 **23 个测试**通过。前 11 个用例使用 `@Transactional` 自动回滚；并发用例需要事务真实提交，因此不开启测试事务，改为独立用户 + 用例结束调用注销接口物理清理。限流/幂等/业务指标的内存计数不随事务回滚，测试用「独立 IP / 独立用户」隔离、指标用前后差值断言，避免用例间互相污染。
 
 ### 11. 测试数据的时间回拨陷阱
 
@@ -285,6 +295,24 @@
 **效果**：问「论文进度」能准确召回论文任务的累计番茄与最近完成日，不相关的健身记录不会混入；未配置 DeepSeek Key 时检索和引用照常返回，仅 AI 文本降级为 null。
 
 **取舍**：BM25 不理解同义词（「专注」查不到「沉浸」），后续可替换为向量检索；但当前方案零额外服务、零推理成本，适合本项目的部署场景。
+
+### 14. 可观测性落地：可选依赖的健康误报 + 异步线程 traceId 丢失
+
+**现象**：
+1. 接入 Actuator 后，本机没装 Redis，`/actuator/health` 整体返回 `DOWN`，但应用其实完全可以正常工作（refresh token 已降级）；
+2. SSE 流式周报的日志里没有 traceId，无法和触发它的 HTTP 请求串起来。
+
+**根因**：
+1. Spring Boot 自动配置的 `RedisHealthIndicator` 把 Redis 当作强依赖，连接失败会把聚合健康状态拖成 `DOWN`；
+2. `TraceIdFilter` 在 `finally` 中清理 MDC，而流式周报把实际调用丢给线程池异步执行，线程池线程不会继承父线程的 MDC。
+
+**方案**：
+- 关闭 Redis 健康检查（`management.health.redis.enabled=false`），与「Redis 可选、可降级」的架构约定保持一致；MySQL 作为强依赖仍参与健康判定；
+- `TraceIdFilter` 用白名单正则校验入站 `X-Trace-Id`（防日志注入），生成/沿用后写入 MDC 与响应头，`finally` 清理避免 Tomcat 线程复用串号；
+- 异步任务提交前 `MDC.getCopyOfContextMap()` 拷贝上下文，任务内 `setContextMap`，`finally` 中 `clear()`，避免污染复用线程；
+- 业务指标只使用低基数标签（feature / outcome / reason / method），不把 userId、任务标题等高基数值放进标签，防止 Prometheus 时间序列爆炸。
+
+**验证**：健康检查只报告 `db / diskSpace / ping / ssl` 且整体 `UP`；登录响应头返回 16 位 traceId，同一请求的所有日志（WebLogAspect、异常、SQL）前缀一致，传非法 traceId 会被拒绝并回退为服务端生成；对番茄启动/中断、AI 降级、限流、幂等分别断言指标自增。
 
 ---
 
@@ -352,16 +380,48 @@ IMAGE_TAG=latest docker compose -f docker-compose.yml -f docker-compose.prod.yml
 
 > GHCR 包首次推送后默认私有：可在 GitHub 仓库 → Packages → 包设置中改为 Public，或保持私有并在服务器上先 `docker login`。
 
-### 5. 运行测试
+### 5. 指标与看板（可选）
+
+只启动后端即可访问基础端点：
+
+```bash
+curl http://localhost:8080/actuator/health     # 健康检查（db / diskSpace / ssl）
+curl http://localhost:8080/actuator/info       # 应用名与版本
+curl http://localhost:8080/actuator/prometheus # Prometheus 文本格式指标
+```
+
+需要看板时，叠加可观测性编排：
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.observability.yml up -d --build
+```
+
+- Prometheus：`http://localhost:9090`（抓取 `app:8080/actuator/prometheus`）
+- Grafana：`http://localhost:3000`（默认 `admin / admin`，可用 `GRAFANA_PASSWORD` 覆盖），预置「Pomodoro Server - Overview」面板
+
+核心指标：
+
+| 指标 | 说明 |
+| --- | --- |
+| `http_server_requests_seconds_*` | QPS、P95 延迟、状态码分布（Spring 自动埋点） |
+| `pomodoro_started/completed/interrupted_total` | 番茄生命周期事件，启动指标带 `bound_task` 标签 |
+| `pomodoro_focus_duration_seconds_*` | 完成番茄的专注时长分位数 |
+| `ai_call_duration_seconds_*` / `ai_degraded_total` | AI 调用耗时与降级原因（feature / reason） |
+| `rate_limit_triggered_total` / `idempotent_rejected_total` | 限流与幂等拦截次数 |
+| `jvm_*` / `hikaricp_*` | JVM 内存/GC、数据库连接池 |
+
+> 安全提示：Actuator 端点不走 JWT 拦截器。生产环境建议只暴露 `health,prometheus`，并通过网关或内网访问，避免 `metrics`、`env` 等端点匿名可达。
+
+### 6. 运行测试
 
 ```bash
 cd pomodoro-server
 mvn test
 ```
 
-测试需要本地 MySQL 可连接；集成测试使用事务回滚，不会污染数据库。
+测试需要本地 MySQL 可连接；集成测试使用事务回滚，不会污染数据库。可观测性测试断言指标自增，由于指标注册表不随事务回滚，统一使用「执行前后差值」断言。
 
-### 6. 持续集成（GitHub Actions）
+### 7. 持续集成（GitHub Actions）
 
 工作流文件：`.github/workflows/ci.yml`，push 到 `main` / `master` 或提交 PR 时自动执行：
 
@@ -389,11 +449,14 @@ mvn test
 │   │   ├── entity/      # 数据库实体
 │   │   ├── security/    # JWT、拦截器、ThreadLocal
 │   │   ├── common/      # 统一返回、异常、AOP 切面
+│   │   ├── observability/ # traceId 过滤器 + 业务指标埋点
 │   │   └── ai/          # DeepSeek 客户端
-│   ├── src/test/        # JWT 单测 + 核心链路集成测试
+│   ├── src/test/        # JWT 单测 + 核心链路/可观测性集成测试
 │   ├── sql/schema.sql   # 建库建表脚本
+│   ├── observability/   # Prometheus 抓取配置 + Grafana 预置面板
 │   ├── Dockerfile
-│   └── docker-compose.yml
+│   ├── docker-compose.yml
+│   └── docker-compose.observability.yml
 └── README.md
 ```
 
@@ -405,11 +468,12 @@ mvn test
 2. **服务端可信计时**：不信任客户端时长，服务端对账 + 上下限校验；前端以服务端时间为锚点，刷新不丢状态。
 3. **可降级架构**：Redis、DeepSeek 都是可选依赖，缺任何一个项目都能完整启动和演示，适合本地/面试环境。
 4. **真实踩坑与修复**：四舍五入导致的负时长、ThreadLocal 泄漏、软删与注销冲突、N+1、并发 401 等问题均有明确定位、修复和回归验证。
-5. **有回归保障**：19 个测试，其中 9 个是真实 Spring 上下文 + MySQL 的集成测试，覆盖认证、任务、番茄、统计、导出、数据隔离、AI 降级、限流、幂等与并发竞态；另有 6 个 RAG 检索单测。
+5. **有回归保障**：23 个测试，其中 13 个是真实 Spring 上下文 + MySQL 的集成测试，覆盖认证、任务、番茄、统计、导出、数据隔离、AI 降级、限流、幂等、并发竞态与可观测性指标；另有 6 个 RAG 检索单测。
 6. **工程化完整**：统一返回体、全局异常处理、AOP 日志、限流、幂等、定时补偿、Docker Compose 一键部署；GitHub Actions 自动跑测试、构建镜像并发布到 GHCR。
 7. **前端体验**：中英双语（响应式 i18n）、暗黑模式、H5 CSV 直接下载、SSE 流式 AI 输出；GET 接口离线缓存，断网时页面仍可展示最近数据，刷新后可恢复进行中的番茄状态。
 8. **可控成本的 AI 问答**：BM25 + 中文 bigram + 时间衰减做历史数据检索，Top 8 / 1800 字符预算控制提示词，无命中自动回退；回答附带引用来源，可解释、可验证。
 9. **数据隔离**：所有查询强制带 `userId`，跨用户访问返回 404；集成测试专门覆盖越权场景。
+10. **可观测性闭环**：健康检查 + JVM/HTTP 自动指标 + 业务指标埋点 + traceId 全链路日志 + Prometheus/Grafana 预置面板；指标标签控制基数，测试覆盖指标自增与 traceId 边界。
 
 ---
 
@@ -419,7 +483,7 @@ mvn test
 2. **refresh token 轮换**：每次刷新签发新 token 并吊销旧 jti，进一步降低 token 泄露风险。
 3. **统计数据预聚合**：数据量增大后，热力图/月报改为按日预聚合或加覆盖索引，避免范围扫描。
 4. **AI 检索升级**：当前 BM25 已覆盖关键词召回，后续可接入 Embedding / 向量库补足同义词与口语化提问；周报支持异步任务化，避免长连接占用。
-5. **可观测性**：接入 Prometheus + Micrometer，补充慢 SQL、AI 调用耗时、限流命中率等指标。
+5. **告警与链路追踪**：基于现有指标配置 Prometheus 告警（5xx、AI 降级率、连接池等待），并接入 OpenTelemetry 将 traceId 上报到 Jaeger/Tempo，补足跨服务链路视图与慢 SQL 定位。
 6. **自动化部署**：在 GHCR 镜像发布的基础上，通过 SSH 自动拉取镜像并重启服务（需要配置服务器地址、SSH 密钥等仓库 Secrets）。
 7. **前端工程化**：页面组件拆分、写请求失败重试/离线队列、App/小程序端适配验证。
 8. **测试完善**：补充 SSE 流式接口、统计边界（跨天、跨周、空数据）与并发场景（同时开始番茄、并发打卡）的测试。

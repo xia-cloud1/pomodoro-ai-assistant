@@ -3,6 +3,8 @@ package com.pomodoro.common.aspect;
 import com.pomodoro.common.BusinessException;
 import com.pomodoro.common.ResultCode;
 import com.pomodoro.common.annotation.RateLimit;
+import com.pomodoro.observability.BusinessMetrics;
+import lombok.RequiredArgsConstructor;
 import org.aspectj.lang.ProceedingJoinPoint;
 import org.aspectj.lang.annotation.Around;
 import org.aspectj.lang.annotation.Aspect;
@@ -20,8 +22,10 @@ import java.util.concurrent.ConcurrentLinkedDeque;
  */
 @Aspect
 @Component
+@RequiredArgsConstructor
 public class RateLimitAspect {
 
+    private final BusinessMetrics metrics;
     private final ConcurrentHashMap<String, Deque<Long>> store = new ConcurrentHashMap<>();
 
     @Around("@annotation(rateLimit)")
@@ -36,6 +40,7 @@ public class RateLimitAspect {
                 queue.pollFirst();
             }
             if (queue.size() >= rateLimit.limit()) {
+                metrics.rateLimitTriggered(pjp.getSignature().getName());
                 throw new BusinessException(ResultCode.TOO_MANY_REQUESTS);
             }
             queue.addLast(now);

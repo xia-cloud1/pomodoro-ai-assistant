@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.pomodoro.observability.BusinessMetrics;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -35,6 +36,7 @@ public class DeepSeekClient {
 
     private final RestTemplate restTemplate;
     private final ObjectMapper objectMapper;
+    private final BusinessMetrics metrics;
 
     @Value("${deepseek.base-url}")
     private String baseUrl;
@@ -45,9 +47,11 @@ public class DeepSeekClient {
 
     public DeepSeekClient(ObjectMapper objectMapper,
                           RestTemplateBuilder builder,
+                          BusinessMetrics metrics,
                           @Value("${deepseek.connect-timeout:10000}") int connectTimeout,
                           @Value("${deepseek.read-timeout:120000}") int readTimeout) {
         this.objectMapper = objectMapper;
+        this.metrics = metrics;
         this.restTemplate = builder
                 .setConnectTimeout(Duration.ofMillis(connectTimeout))
                 .setReadTimeout(Duration.ofMillis(readTimeout))
@@ -55,20 +59,24 @@ public class DeepSeekClient {
     }
 
     /**
-     * 调用 chat/completions，返回助手文本；未配置或失败返回 null
-     */
-    /**
      * 是否已配置可用的 API key
      */
     public boolean isConfigured() {
         return StringUtils.hasText(apiKey) && !PLACEHOLDER_KEY.equals(apiKey);
     }
 
-    public String chat(String systemPrompt, String userMessage) {
+    /**
+     * 调用 chat/completions，返回助手文本；未配置或失败返回 null。
+     *
+     * @param feature 业务功能标识（weekly/daily/monthly/ask/split/golden），仅用于指标标签
+     */
+    public String chat(String feature, String systemPrompt, String userMessage) {
         if (!isConfigured()) {
+            metrics.aiDegraded(feature, "not_configured");
             log.info("DeepSeek API key 未配置，AI 分析降级为空");
             return null;
         }
+        long start = System.nanoTime();
         try {
             String url = baseUrl.replaceAll("/+$", "") + "/chat/completions";
             ObjectNode body = objectMapper.createObjectNode();
@@ -86,20 +94,28 @@ public class DeepSeekClient {
 
             ResponseEntity<String> resp = restTemplate.exchange(url, HttpMethod.POST, entity, String.class);
             JsonNode root = objectMapper.readTree(resp.getBody());
-            return root.path("choices").path(0).path("message").path("content").asText(null);
+            String content = root.path("choices").path(0).path("message").path("content").asText(null);
+            metrics.aiCall(feature, "chat", "success", System.nanoTime() - start);
+            return content;
         } catch (Exception e) {
+            metrics.aiCall(feature, "chat", "failed", System.nanoTime() - start);
+            metrics.aiDegraded(feature, "call_failed");
             log.warn("调用 DeepSeek 失败，AI 分析降级为空：{}", e.getMessage());
             return null;
         }
     }
 
     /**
-     * 流式调用 chat/completions（stream=true），逐段回调；未配置或失败时静默不回调
+     * 流式调用 chat/completions（stream=true），逐段回调；未配置或失败时静默不回调。
+     *
+     * @param feature 业务功能标识，仅用于指标标签
      */
-    public void streamChat(String systemPrompt, String userMessage, Consumer<String> onChunk) {
+    public void streamChat(String feature, String systemPrompt, String userMessage, Consumer<String> onChunk) {
         if (!isConfigured()) {
+            metrics.aiDegraded(feature, "not_configured");
             return;
         }
+        long start = System.nanoTime();
         try {
             String url = baseUrl.replaceAll("/+$", "") + "/chat/completions";
             ObjectNode body = objectMapper.createObjectNode();
@@ -138,7 +154,10 @@ public class DeepSeekClient {
                         }
                         return null;
                     });
+            metrics.aiCall(feature, "stream", "success", System.nanoTime() - start);
         } catch (Exception e) {
+            metrics.aiCall(feature, "stream", "failed", System.nanoTime() - start);
+            metrics.aiDegraded(feature, "call_failed");
             log.warn("流式调用 DeepSeek 失败：{}", e.getMessage());
         }
     }

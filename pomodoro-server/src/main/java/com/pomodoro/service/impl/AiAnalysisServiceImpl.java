@@ -12,6 +12,7 @@ import com.pomodoro.entity.Task;
 import com.pomodoro.mapper.EnergyLogMapper;
 import com.pomodoro.mapper.PomodoroRecordMapper;
 import com.pomodoro.mapper.TaskMapper;
+import com.pomodoro.observability.BusinessMetrics;
 import com.pomodoro.service.AiAnalysisService;
 import com.pomodoro.service.DailyStatService;
 import com.pomodoro.service.GoalService;
@@ -29,6 +30,7 @@ import com.pomodoro.vo.goal.GoalVO;
 import com.pomodoro.vo.stat.HourDistributionVO;
 import com.pomodoro.vo.stat.ReportVO;
 import lombok.RequiredArgsConstructor;
+import org.slf4j.MDC;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import org.springframework.stereotype.Service;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
@@ -68,11 +70,12 @@ public class AiAnalysisServiceImpl implements AiAnalysisService {
     private final ThreadPoolTaskExecutor taskExecutor;
     private final UserMemoryBuilder userMemoryBuilder;
     private final MemoryRetriever memoryRetriever;
+    private final BusinessMetrics metrics;
 
     @Override
     public WeeklyReportVO weeklyReport(Long userId, LocalDate weekStart) {
         WeeklyReportVO vo = buildWeeklyReport(userId, weekStart);
-        vo.setAiAnalysis(deepSeekClient.chat(SYSTEM_PROMPT, buildPrompt(vo)));
+        vo.setAiAnalysis(deepSeekClient.chat("weekly", SYSTEM_PROMPT, buildPrompt(vo)));
         return vo;
     }
 
@@ -81,12 +84,18 @@ public class AiAnalysisServiceImpl implements AiAnalysisService {
         WeeklyReportVO vo = buildWeeklyReport(userId, weekStart);
         String prompt = buildPrompt(vo);
         SseEmitter emitter = new SseEmitter(120_000L);
+        // 异步线程默认不继承 MDC，手动把当前请求的 traceId 带过去，保证流式日志可串联
+        Map<String, String> mdcContext = MDC.getCopyOfContextMap();
         taskExecutor.execute(() -> {
+            if (mdcContext != null) {
+                MDC.setContextMap(mdcContext);
+            }
             try {
                 if (!deepSeekClient.isConfigured()) {
+                    metrics.aiDegraded("weekly", "not_configured");
                     emitter.send(SseEmitter.event().data("AI 分析未配置，暂不可用"));
                 } else {
-                    deepSeekClient.streamChat(SYSTEM_PROMPT, prompt, chunk -> {
+                    deepSeekClient.streamChat("weekly", SYSTEM_PROMPT, prompt, chunk -> {
                         try {
                             emitter.send(SseEmitter.event().data(chunk));
                         } catch (Exception ignored) {
@@ -96,6 +105,9 @@ public class AiAnalysisServiceImpl implements AiAnalysisService {
                 emitter.complete();
             } catch (Exception e) {
                 emitter.completeWithError(e);
+            } finally {
+                // 线程池复用，必须清理，否则 traceId 会串到下一个任务
+                MDC.clear();
             }
         });
         return emitter;
@@ -167,7 +179,7 @@ public class AiAnalysisServiceImpl implements AiAnalysisService {
         vo.setEnergyLevel(energy != null ? energy.getEnergyLevel() : null);
         vo.setMood(energy != null ? energy.getMood() : null);
         vo.setTopTasks(topTasks(userId, d, d));
-        vo.setAiAnalysis(deepSeekClient.chat(SYSTEM_PROMPT, buildDailyPrompt(vo)));
+        vo.setAiAnalysis(deepSeekClient.chat("daily", SYSTEM_PROMPT, buildDailyPrompt(vo)));
         return vo;
     }
 
@@ -181,7 +193,7 @@ public class AiAnalysisServiceImpl implements AiAnalysisService {
         MonthlyReportVO vo = new MonthlyReportVO();
         vo.setSummary(summary);
         vo.setTopTasks(topTasks(userId, summary.getStartDate(), summary.getEndDate()));
-        vo.setAiAnalysis(deepSeekClient.chat(SYSTEM_PROMPT, buildMonthlyPrompt(summary, vo.getTopTasks())));
+        vo.setAiAnalysis(deepSeekClient.chat("monthly", SYSTEM_PROMPT, buildMonthlyPrompt(summary, vo.getTopTasks())));
         return vo;
     }
 
@@ -205,7 +217,7 @@ public class AiAnalysisServiceImpl implements AiAnalysisService {
         AskVO vo = new AskVO();
         vo.setQuestion(question);
         vo.setSources(memory.documents().stream().map(MemoryDocument::citation).toList());
-        vo.setAnswer(deepSeekClient.chat(ASK_SYSTEM_PROMPT,
+        vo.setAnswer(deepSeekClient.chat("ask", ASK_SYSTEM_PROMPT,
                 context + "【用户问题】\n" + question));
         return vo;
     }
@@ -213,7 +225,7 @@ public class AiAnalysisServiceImpl implements AiAnalysisService {
     @Override
     public SplitTaskVO splitTask(Long userId, String title, String description) {
         SplitTaskVO vo = new SplitTaskVO();
-        String answer = deepSeekClient.chat(SPLIT_SYSTEM_PROMPT, buildSplitPrompt(title, description));
+        String answer = deepSeekClient.chat("split", SPLIT_SYSTEM_PROMPT, buildSplitPrompt(title, description));
         vo.setSubtasks(parseSubtasks(answer));
         return vo;
     }
@@ -226,8 +238,10 @@ public class AiAnalysisServiceImpl implements AiAnalysisService {
 
         GoldenHourVO vo = new GoldenHourVO();
         vo.setPeriods(buildGoldenPeriods(distribution));
-        if (deepSeekClient.isConfigured() && !vo.getPeriods().isEmpty()) {
-            vo.setAiSuggestion(deepSeekClient.chat(GOLDEN_SYSTEM_PROMPT, buildGoldenPrompt(vo.getPeriods())));
+        if (!deepSeekClient.isConfigured()) {
+            metrics.aiDegraded("golden", "not_configured");
+        } else if (!vo.getPeriods().isEmpty()) {
+            vo.setAiSuggestion(deepSeekClient.chat("golden", GOLDEN_SYSTEM_PROMPT, buildGoldenPrompt(vo.getPeriods())));
         }
         return vo;
     }

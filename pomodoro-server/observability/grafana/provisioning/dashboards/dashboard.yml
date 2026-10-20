@@ -1,0 +1,12 @@
+# Grafana 从文件系统加载仪表盘
+apiVersion: 1
+
+providers:
+  - name: pomodoro
+    orgId: 1
+    folder: Pomodoro
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    options:
+      path: /var/lib/grafana/dashboards

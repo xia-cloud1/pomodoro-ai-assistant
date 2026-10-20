@@ -22,7 +22,7 @@ import java.io.IOException;
  * 放在过滤器层用 try/finally 兜住，覆盖所有请求（含拦截器白名单内的 /api/auth/**）。
  */
 @Component
-@Order(Ordered.HIGHEST_PRECEDENCE)
+@Order(Ordered.HIGHEST_PRECEDENCE + 1)
 public class UserContextFilter implements Filter {
 
     @Override

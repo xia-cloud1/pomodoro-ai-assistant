@@ -48,6 +48,18 @@
             <artifactId>spring-boot-starter-data-redis</artifactId>
         </dependency>
 
+        <!-- 可观测性：Actuator 健康检查 + Micrometer 指标 -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-actuator</artifactId>
+        </dependency>
+        <!-- Prometheus 文本格式导出（/actuator/prometheus） -->
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-registry-prometheus</artifactId>
+            <scope>runtime</scope>
+        </dependency>
+
         <!-- MyBatis-Plus (Spring Boot 3) -->
         <dependency>
             <groupId>com.baomidou</groupId>

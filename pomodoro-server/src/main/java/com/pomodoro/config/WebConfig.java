@@ -33,7 +33,8 @@ public class WebConfig implements WebMvcConfigurer {
                 .allowedOriginPatterns("*")
                 .allowedMethods("GET", "POST", "PUT", "DELETE", "OPTIONS")
                 .allowedHeaders("*")
-                .exposedHeaders("Authorization")
+                // 前端跨域时需要读取 traceId 用于报错反馈
+                .exposedHeaders("Authorization", "X-Trace-Id")
                 .allowCredentials(true)
                 .maxAge(3600);
     }

@@ -1,0 +1,39 @@
+# 可观测性覆盖文件：Prometheus + Grafana
+# 用法（在 pomodoro-server 目录，与主 compose 叠加）：
+#   docker compose -f docker-compose.yml -f docker-compose.observability.yml up -d --build
+# 访问：
+#   Prometheus http://localhost:9090
+#   Grafana    http://localhost:3000 （默认 admin / admin，可用 GRAFANA_PASSWORD 覆盖）
+services:
+  prometheus:
+    image: prom/prometheus:v3.1.0
+    container_name: pomodoro-prometheus
+    restart: unless-stopped
+    volumes:
+      - ./observability/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    ports:
+      - "9090:9090"
+    depends_on:
+      - app
+
+  grafana:
+    image: grafana/grafana:11.5.1
+    container_name: pomodoro-grafana
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
+
+volumes:
+  prometheus-data:
+  grafana-data:

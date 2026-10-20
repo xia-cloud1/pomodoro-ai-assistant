@@ -1,0 +1,170 @@
+{
+  "annotations": {
+    "list": []
+  },
+  "editable": true,
+  "graphTooltip": 1,
+  "links": [],
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "tags": ["pomodoro", "spring-boot"],
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
+  "timezone": "browser",
+  "title": "Pomodoro Server - Overview",
+  "uid": "pomodoro-overview",
+  "version": 1,
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "当前 QPS",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"h": 5, "w": 6, "x": 0, "y": 0},
+      "fieldConfig": {"defaults": {"unit": "reqps", "decimals": 2}, "overrides": []},
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "colorMode": "value", "graphMode": "area", "justifyMode": "auto", "textMode": "auto"},
+      "targets": [
+        {"refId": "A", "expr": "sum(rate(http_server_requests_seconds_count{application=\"pomodoro-server\"}[5m]))", "legendFormat": "QPS"}
+      ]
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "5xx 速率 (5m)",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"h": 5, "w": 6, "x": 6, "y": 0},
+      "fieldConfig": {"defaults": {"unit": "reqps", "decimals": 2, "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "red", "value": 0.01}]}}, "overrides": []},
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "colorMode": "value", "graphMode": "area", "justifyMode": "auto", "textMode": "auto"},
+      "targets": [
+        {"refId": "A", "expr": "sum(rate(http_server_requests_seconds_count{application=\"pomodoro-server\",status=~\"5..\"}[5m]))", "legendFormat": "5xx/s"}
+      ]
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "JVM Heap",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"h": 5, "w": 6, "x": 12, "y": 0},
+      "fieldConfig": {"defaults": {"unit": "bytes", "decimals": 1}, "overrides": []},
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "colorMode": "value", "graphMode": "area", "justifyMode": "auto", "textMode": "auto"},
+      "targets": [
+        {"refId": "A", "expr": "sum(jvm_memory_used_bytes{application=\"pomodoro-server\",area=\"heap\"})", "legendFormat": "heap"}
+      ]
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "AI 降级次数 (1h)",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"h": 5, "w": 6, "x": 18, "y": 0},
+      "fieldConfig": {"defaults": {"unit": "short", "decimals": 0, "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "orange", "value": 1}, {"color": "red", "value": 10}]}}, "overrides": []},
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "colorMode": "value", "graphMode": "area", "justifyMode": "auto", "textMode": "auto"},
+      "targets": [
+        {"refId": "A", "expr": "sum(increase(ai_degraded_total{application=\"pomodoro-server\"}[1h]))", "legendFormat": "degraded"}
+      ]
+    },
+    {
+      "id": 10,
+      "type": "timeseries",
+      "title": "HTTP QPS by URI",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 5},
+      "fieldConfig": {"defaults": {"unit": "reqps", "custom": {"drawStyle": "line", "lineWidth": 1, "fillOpacity": 10, "showPoints": "never"}}, "overrides": []},
+      "options": {"legend": {"displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "multi", "sort": "desc"}},
+      "targets": [
+        {"refId": "A", "expr": "sum by (uri) (rate(http_server_requests_seconds_count{application=\"pomodoro-server\"}[5m]))", "legendFormat": "{{uri}}"}
+      ]
+    },
+    {
+      "id": 11,
+      "type": "timeseries",
+      "title": "HTTP P95 延迟 by URI",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 5},
+      "fieldConfig": {"defaults": {"unit": "s", "custom": {"drawStyle": "line", "lineWidth": 1, "fillOpacity": 10, "showPoints": "never"}}, "overrides": []},
+      "options": {"legend": {"displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "multi", "sort": "desc"}},
+      "targets": [
+        {"refId": "A", "expr": "histogram_quantile(0.95, sum by (le, uri) (rate(http_server_requests_seconds_bucket{application=\"pomodoro-server\"}[5m])))", "legendFormat": "{{uri}}"}
+      ]
+    },
+    {
+      "id": 12,
+      "type": "timeseries",
+      "title": "番茄事件 (1h increase)",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 13},
+      "fieldConfig": {"defaults": {"unit": "short", "custom": {"drawStyle": "bars", "lineWidth": 1, "fillOpacity": 40, "showPoints": "never"}}, "overrides": []},
+      "options": {"legend": {"displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "multi", "sort": "desc"}},
+      "targets": [
+        {"refId": "A", "expr": "sum(increase(pomodoro_started_total{application=\"pomodoro-server\"}[1h]))", "legendFormat": "started"},
+        {"refId": "B", "expr": "sum(increase(pomodoro_completed_total{application=\"pomodoro-server\"}[1h]))", "legendFormat": "completed"},
+        {"refId": "C", "expr": "sum(increase(pomodoro_interrupted_total{application=\"pomodoro-server\"}[1h]))", "legendFormat": "interrupted"}
+      ]
+    },
+    {
+      "id": 13,
+      "type": "timeseries",
+      "title": "AI 降级速率 by feature/reason",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 13},
+      "fieldConfig": {"defaults": {"unit": "reqps", "custom": {"drawStyle": "line", "lineWidth": 1, "fillOpacity": 10, "showPoints": "never"}}, "overrides": []},
+      "options": {"legend": {"displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "multi", "sort": "desc"}},
+      "targets": [
+        {"refId": "A", "expr": "sum by (feature, reason) (rate(ai_degraded_total{application=\"pomodoro-server\"}[5m]))", "legendFormat": "{{feature}} / {{reason}}"}
+      ]
+    },
+    {
+      "id": 14,
+      "type": "timeseries",
+      "title": "JVM Heap by pool",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 21},
+      "fieldConfig": {"defaults": {"unit": "bytes", "custom": {"drawStyle": "line", "lineWidth": 1, "fillOpacity": 10, "showPoints": "never"}}, "overrides": []},
+      "options": {"legend": {"displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "multi", "sort": "desc"}},
+      "targets": [
+        {"refId": "A", "expr": "sum by (id) (jvm_memory_used_bytes{application=\"pomodoro-server\",area=\"heap\"})", "legendFormat": "{{id}}"}
+      ]
+    },
+    {
+      "id": 15,
+      "type": "timeseries",
+      "title": "HikariCP 连接",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 21},
+      "fieldConfig": {"defaults": {"unit": "short", "custom": {"drawStyle": "line", "lineWidth": 1, "fillOpacity": 10, "showPoints": "never"}}, "overrides": []},
+      "options": {"legend": {"displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "multi", "sort": "desc"}},
+      "targets": [
+        {"refId": "A", "expr": "hikaricp_connections_active{application=\"pomodoro-server\"}", "legendFormat": "active"},
+        {"refId": "B", "expr": "hikaricp_connections_idle{application=\"pomodoro-server\"}", "legendFormat": "idle"},
+        {"refId": "C", "expr": "hikaricp_connections_pending{application=\"pomodoro-server\"}", "legendFormat": "pending"}
+      ]
+    },
+    {
+      "id": 16,
+      "type": "timeseries",
+      "title": "专注时长 P50 / P95",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 29},
+      "fieldConfig": {"defaults": {"unit": "s", "custom": {"drawStyle": "line", "lineWidth": 1, "fillOpacity": 10, "showPoints": "never"}}, "overrides": []},
+      "options": {"legend": {"displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "multi", "sort": "desc"}},
+      "targets": [
+        {"refId": "A", "expr": "histogram_quantile(0.5, sum by (le) (rate(pomodoro_focus_duration_seconds_bucket{application=\"pomodoro-server\"}[1h])))", "legendFormat": "P50"},
+        {"refId": "B", "expr": "histogram_quantile(0.95, sum by (le) (rate(pomodoro_focus_duration_seconds_bucket{application=\"pomodoro-server\"}[1h])))", "legendFormat": "P95"}
+      ]
+    },
+    {
+      "id": 17,
+      "type": "timeseries",
+      "title": "HTTP 状态码分布",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 29},
+      "fieldConfig": {"defaults": {"unit": "reqps", "custom": {"drawStyle": "line", "lineWidth": 1, "fillOpacity": 10, "showPoints": "never"}}, "overrides": []},
+      "options": {"legend": {"displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "multi", "sort": "desc"}},
+      "targets": [
+        {"refId": "A", "expr": "sum by (status) (rate(http_server_requests_seconds_count{application=\"pomodoro-server\"}[5m]))", "legendFormat": "{{status}}"}
+      ]
+    }
+  ]
+}
