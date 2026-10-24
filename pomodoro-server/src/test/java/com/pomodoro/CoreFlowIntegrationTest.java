@@ -129,10 +129,18 @@ class CoreFlowIntegrationTest {
 
     @Test
     void pomodoroCompleteGoalStatPointsAndReportFlow() throws Exception {
+        // 日期基准统一用「回拨后的开始时间」，不用 LocalDate.now()：
+        // 回拨 120 秒若正好跨过午夜，记录就属于昨天（跨月/跨周时还会换月换周），
+        // 按当前时刻断言会在 00:00~00:02 这些窗口里必挂。
+        LocalDateTime startAt = LocalDateTime.now().withNano(0).minusSeconds(120);
+        LocalDate statDate = startAt.toLocalDate();
+
         long taskId = postJson("/api/task", Map.of("title", "写周报"), token)
                 .path("data").path("id").asLong();
 
-        JsonNode goal = putJson("/api/goal", Map.of("targetPomodoros", 2), token);
+        // 目标显式挂在记录所属那一周，避免跨周边界把目标与记录分到两周
+        JsonNode goal = putJson("/api/goal",
+                Map.of("weekStart", statDate.toString(), "targetPomodoros", 2), token);
         assertEquals(SUCCESS, goal.path("code").asInt());
 
         // 开始番茄（绑定任务）
@@ -144,7 +152,7 @@ class CoreFlowIntegrationTest {
         // 注意 DATETIME(0) 会把小数秒四舍五入，只回拨 60 秒可能落成 59 秒，故留出余量。
         pomodoroRecordMapper.update(null, new LambdaUpdateWrapper<PomodoroRecord>()
                 .eq(PomodoroRecord::getId, recordId)
-                .set(PomodoroRecord::getStartTime, LocalDateTime.now().withNano(0).minusSeconds(120)));
+                .set(PomodoroRecord::getStartTime, startAt));
 
         JsonNode complete = postJson("/api/pomodoro/" + recordId + "/complete", null, token);
         assertEquals(SUCCESS, complete.path("code").asInt());
@@ -155,13 +163,13 @@ class CoreFlowIntegrationTest {
         JsonNode taskDetail = getJson("/api/task/" + taskId, token);
         assertEquals(1, taskDetail.path("data").path("actualPomodoros").asInt());
 
-        // 周目标进度实时计算
-        JsonNode goalNow = getJson("/api/goal", token);
+        // 周目标进度实时计算（查记录所属那一周）
+        JsonNode goalNow = getJson("/api/goal?weekStart=" + statDate, token);
         assertEquals(1, goalNow.path("data").path("achievedPomodoros").asInt());
         assertEquals(50, goalNow.path("data").path("progressPercent").asInt());
 
         // 日统计
-        JsonNode daily = getJson("/api/daily-stat?date=" + LocalDate.now(), token);
+        JsonNode daily = getJson("/api/daily-stat?date=" + statDate, token);
         assertEquals(1, daily.path("data").path("completedCount").asInt());
 
         // 番茄历史分页
@@ -174,16 +182,16 @@ class CoreFlowIntegrationTest {
         assertEquals(30, points.path("data").path("points").asInt());
 
         // 月报表
-        LocalDate now = LocalDate.now();
-        JsonNode report = getJson("/api/stat/report?year=" + now.getYear() + "&month=" + now.getMonthValue(), token);
+        JsonNode report = getJson("/api/stat/report?year=" + statDate.getYear()
+                + "&month=" + statDate.getMonthValue(), token);
         assertEquals(SUCCESS, report.path("code").asInt());
         assertEquals(1, report.path("data").path("completedCount").asInt());
-        assertEquals(now.toString(), report.path("data").path("bestDay").path("date").asText());
+        assertEquals(statDate.toString(), report.path("data").path("bestDay").path("date").asText());
 
         // CSV 导出：UTF-8 BOM + 任务标题
         byte[] csv = mockMvc.perform(get("/api/export/pomodoro")
-                        .param("start", now.toString())
-                        .param("end", now.toString())
+                        .param("start", statDate.toString())
+                        .param("end", statDate.toString())
                         .header("Authorization", "Bearer " + token))
                 .andExpect(status().isOk())
                 .andReturn().getResponse().getContentAsByteArray();

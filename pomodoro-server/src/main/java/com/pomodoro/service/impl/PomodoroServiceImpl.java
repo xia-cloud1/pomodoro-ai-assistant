@@ -115,7 +115,12 @@ public class PomodoroServiceImpl implements PomodoroService {
     public PomodoroVO interrupt(Long id, String reason) {
         PomodoroRecord record = getOwnedRunning(id);
         LocalDateTime end = LocalDateTime.now();
-        int duration = reconcile(record.getStartTime(), end, 0);
+        // 中断是「释放锁」的唯一出路，不能因为时长异常而失败：一条挂过夜的记录如果
+        // 既不能完成（防作弊上限拦住）又不能中断，running 唯一索引会让 start 永远 409，
+        // 用户被彻底锁死。因此这里只按秒数对账、把时长封顶到单次上限，
+        // 既保证一定能释放锁，也不让异常长的记录污染日统计的分钟数。
+        long seconds = Math.max(0, Duration.between(record.getStartTime(), end).getSeconds());
+        int duration = (int) Math.min(seconds, MAX_DURATION_SECONDS);
 
         record.setEndTime(end);
         record.setDuration(duration);

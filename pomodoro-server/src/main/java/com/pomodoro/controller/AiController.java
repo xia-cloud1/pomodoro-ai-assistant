@@ -47,6 +47,10 @@ public class AiController {
 
     /**
      * 流式生成周报（SSE）
+     * <p>
+     * 这里<b>不要</b>给 produces 加 charset：produces 参与内容协商，而前端发的是不带参数的
+     * {@code Accept: text/event-stream}，带参数的可产出类型与之不匹配时可能直接 406，把流式
+     * 周报打挂。中文编码由返回的 {@link com.pomodoro.common.Utf8SseEmitter} 通过响应头声明。
      */
     @GetMapping(value = "/weekly-report/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public SseEmitter streamWeeklyReport(@RequestParam(required = false) @DateTimeFormat(iso = DATE) LocalDate weekStart) {

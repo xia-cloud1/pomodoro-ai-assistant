@@ -6,6 +6,7 @@ import com.pomodoro.ai.rag.MemoryDocument;
 import com.pomodoro.ai.rag.MemoryRetriever;
 import com.pomodoro.ai.rag.RetrievalResult;
 import com.pomodoro.ai.rag.UserMemoryBuilder;
+import com.pomodoro.common.Utf8SseEmitter;
 import com.pomodoro.entity.EnergyLog;
 import com.pomodoro.entity.PomodoroRecord;
 import com.pomodoro.entity.Task;
@@ -83,7 +84,9 @@ public class AiAnalysisServiceImpl implements AiAnalysisService {
     public SseEmitter streamWeeklyReport(Long userId, LocalDate weekStart) {
         WeeklyReportVO vo = buildWeeklyReport(userId, weekStart);
         String prompt = buildPrompt(vo);
-        SseEmitter emitter = new SseEmitter(120_000L);
+        // 用 Utf8SseEmitter 而不是原生 SseEmitter：原生写法响应头是裸 text/event-stream，
+        // 不声明 charset，按响应头判编码的客户端会把中文帧解成乱码（详见该类注释）
+        SseEmitter emitter = new Utf8SseEmitter(120_000L);
         // 异步线程默认不继承 MDC，手动把当前请求的 traceId 带过去，保证流式日志可串联
         Map<String, String> mdcContext = MDC.getCopyOfContextMap();
         taskExecutor.execute(() -> {

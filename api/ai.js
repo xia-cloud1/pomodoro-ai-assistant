@@ -18,6 +18,7 @@ export function monthlyReport(year, month) {
 
 // AI 周报 SSE 流式（H5 用 fetch 读流；后端 data 行是纯文本 chunk）
 export function streamWeeklyReport(onChunk, onDone, onError) {
+	// #ifdef H5
 	const token = uni.getStorageSync('accessToken')
 	fetch(BASE_URL + '/api/ai/weekly-report/stream', {
 		method: 'GET',
@@ -48,6 +49,17 @@ export function streamWeeklyReport(onChunk, onDone, onError) {
 			onDone()
 		})
 		.catch((err) => onError(err))
+	// #endif
+
+	// #ifndef H5
+	// App / 小程序没有 fetch 流式读取能力：退回普通接口，一次性拿到 AI 文本后走同样的回调
+	weeklyReport()
+		.then((d) => {
+			if (d && d.aiAnalysis) onChunk(d.aiAnalysis)
+			onDone()
+		})
+		.catch((err) => onError(err))
+	// #endif
 }
 
 // 效率问答（RAG）
