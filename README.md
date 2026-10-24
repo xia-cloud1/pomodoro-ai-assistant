@@ -41,7 +41,7 @@
 | AI | DeepSeek API（OpenAI 兼容协议） | 成本低；未配置 Key 时自动降级 |
 | 前端 | uni-app + Vue 3 | 一套代码同时支持 H5 / App / 小程序 |
 | 前端工具 | HBuilderX | 免 Node 构建链，直接运行与真机调试 |
-| 部署 | Docker 多阶段构建 + Docker Compose | 一条命令拉起 MySQL + Redis + 应用 |
+| 部署 | Nginx + Docker 多阶段构建 + Docker Compose | Nginx 作为唯一对外入口：托管 H5 静态资源、反代 `/api`、限制运维端点来源 |
 | 可观测性 | Actuator + Micrometer + Prometheus + Grafana | 健康检查、JVM/HTTP/业务指标、预置可视化面板 |
 | 测试 | JUnit 5 + MockMvc | 真实 Spring 上下文 + 数据库的集成测试 |
 
@@ -57,9 +57,16 @@
 │ 专注页 / 任务页 / 统计页 / 我的页 / AI 页 / 排行榜 / 海报  │
 │ 统一 request 封装：token 注入、401 单飞刷新、i18n、暗黑模式 │
 └──────────────────────────┬──────────────────────────────┘
-                           │ HTTP + JSON（Bearer Token）
+                           │ HTTPS（生产：同源请求，Nginx 提供页面与 /api）
 ┌──────────────────────────▼──────────────────────────────┐
-│ 接入层                                                    │
+│ 接入层：Nginx（生产唯一对外入口）                          │
+│ 托管 H5 静态资源 / gzip / 安全响应头 / 缓存策略            │
+│ /api → 反向代理到应用（透传 X-Forwarded-For，SSE 关缓冲）  │
+│ /actuator → 仅内网来源可访问，其余返回 404                │
+└──────────────────────────┬──────────────────────────────┘
+                           │ HTTP（仅容器内网可达，端口不发布到公网）
+┌──────────────────────────▼──────────────────────────────┐
+│ 应用内接入层                                              │
 │ TraceIdFilter（traceId → MDC + 响应头 X-Trace-Id）         │
 │ UserContextFilter（ThreadLocal 清理）                     │
 │ JwtInterceptor（登录校验 / 用户存在性校验）                │
@@ -149,7 +156,8 @@ Actuator（health / info / metrics） + Micrometer 业务埋点
 - **跨端适配**：SSE 流式周报在 H5 用 `fetch` 读流，App / 微信小程序自动降级为普通周报接口；CSV 导出区分 H5 Blob 下载与 `downloadFile` 临时文件；同一套代码已通过 H5、App-Plus、微信小程序三端编译
 - **可观测性**：Actuator 健康检查（DB 状态、磁盘、SSL）+ Prometheus 指标导出；自定义业务指标覆盖番茄启动/完成/中断、专注时长分布、AI 调用耗时与降级原因、限流与幂等拦截次数；每个请求生成 `traceId` 写入日志与响应头，支持沿用上游 traceId
 - **可视化**：提供 Prometheus + Grafana 编排与预置面板（QPS、P95 延迟、5xx、JVM 堆、连接池、番茄事件、AI 降级、专注时长分位数）
-- Docker Compose 一键部署（MySQL + Redis + App，可叠加可观测性套件）
+- **生产入口与安全收口**：Nginx 托管 H5 静态资源并反代 `/api`（SSE 单独关闭缓冲、透传真实客户端 IP、`/actuator` 仅内网可达）；`prod` profile 独立收紧 Actuator 暴露面、关闭 `info.env`、CORS 收敛为显式来源（同源部署时完全不开放）、`JWT_SECRET` 缺失或沿用仓库默认值时直接拒绝启动
+- Docker Compose 一键部署（MySQL + Redis + App，可叠加可观测性套件与生产覆盖文件）；应用、MySQL、Redis 端口只绑定 `127.0.0.1`，不随默认编排暴露到公网
 
 ---
 
@@ -249,7 +257,7 @@ Actuator（health / info / metrics） + Micrometer 业务埋点
 
 **方案**：项目不需要 mock 静态方法/final 类，改用子类 mock maker —— 新增 `src/test/resources/mockito-extensions/org.mockito.plugins.MockMaker`，内容为 `mock-maker-subclass`，无需任何 JVM 参数。
 
-**测试覆盖**：全量 **42 个测试**（6 个集成测试类共 28 个用例 + 3 个单测类共 14 个用例），集成用例覆盖：
+**测试覆盖**：全量 **50 个测试**（7 个集成测试类共 29 个用例 + 5 个单测类共 21 个用例），集成用例覆盖：
 - 认证、任务/标签/子任务/打卡；
 - 番茄主链路（完成 → 任务计数 → 周目标 → 日统计 → 积分 → 月报 → CSV）；
 - 进行中恢复与跨用户隔离；
@@ -259,9 +267,10 @@ Actuator（health / info / metrics） + Micrometer 业务埋点
 - **可观测性**：Actuator 健康/信息/Prometheus 端点、traceId 生成与上游沿用/非法值回退、番茄启停指标自增、AI 降级/限流/幂等计数；
 - **SSE 流式**：降级路径只发一帧且立即关闭、帧中文的 **UTF-8 原始字节**、traceId 透传、无 token/坏 token/refresh token 当 access token 一律业务 401、非法 `weekStart` 400、两条并发流互不阻塞、按前端真实 `Accept: text/event-stream` 请求不得 406；
 - **统计口径与日期边界**：跨天/跨月/跨周归属（含月末 23:59、周一 00:00 边界）、RUNNING 不进任何统计、INTERRUPTED 只进日统计与报表、不进热力图/时段分布、闰年与世纪年天数、366 天跨度上限、空数据必须补 0 而不是缺字段；
-- **写入侧对账边界**：不足 30 秒不能完成但记录必须留在 RUNNING（客户端还能中断）、超过 4 小时不能完成但**必须**能中断（否则用户被永久锁死）。
+- **写入侧对账边界**：不足 30 秒不能完成但记录必须留在 RUNNING（客户端还能中断）、超过 4 小时不能完成但**必须**能中断（否则用户被永久锁死）；
+- **反向代理拓扑**：真实 HTTP 下按 `X-Forwarded-For` 分桶限流——同一客户端第 11 次 429、换一个客户端 IP 仍能正常登录。
 
-另有 6 个 RAG 检索单测（中文切词、关键词排序、时间衰减、无命中回退、字符预算、空集合）、4 个效率得分公式单测（三因子与封顶）、4 个 JWT 单测。多数集成用例使用 `@Transactional` 自动回滚；SSE 与并发用例需要真实 HTTP / 事务真实提交，因此不开启测试事务，改为独立用户 + 用例结束调用注销接口物理清理。限流/幂等/业务指标的内存计数不随事务回滚，测试用「独立 IP / 独立用户」隔离、指标用前后差值断言，避免用例间互相污染。
+单测覆盖：RAG 检索 6 个（中文切词、关键词排序、时间衰减、无命中回退、字符预算、空集合）、效率得分公式 4 个（三因子与封顶）、JWT 4 个、生产密钥自检 5 个、CORS 配置收敛 2 个。多数集成用例使用 `@Transactional` 自动回滚；SSE、并发与反代用例需要真实 HTTP / 事务真实提交，因此不开启测试事务，改为独立用户 + 用例结束调用注销接口物理清理。限流/幂等/业务指标的内存计数不随事务回滚，测试用「独立 IP / 独立用户」隔离、指标用前后差值断言，避免用例间互相污染。
 
 ### 11. 测试数据的时间回拨陷阱
 
@@ -369,6 +378,34 @@ Actuator（health / info / metrics） + Micrometer 业务埋点
 
 **验证**：修完在跨午夜窗口复跑全量通过；同时这也暴露了另一类测试基础设施坑——**限流计数在内存中且按 Spring context 共享**，配置完全相同的测试类会复用同一个 context，各 `setUp` 的登录次数在 60 秒窗口内累加，第 11 次起整批用例在 `setUp` 就 429 全红，因此每个用例登录都改用独立 IP 隔离。
 
+### 19. 接上 Nginx 反代后才暴露的三个问题
+
+本地直连跑得好好的功能，套上一层反向代理就变了样——这类问题只在真实拓扑下才出现，靠单机调试发现不了。
+
+**① 登录限流退化成「全站共享」**。限流按 `request.getRemoteAddr()` 分桶，而应用部署在 Nginx 之后时，直连应用的只有代理：所有用户的 `remoteAddr` 都是同一个容器 IP，于是「同 IP 10 次/分钟」变成了**整个站点 10 次/分钟**，第 11 个正常用户就被 429 挡住。修法是两端配合：Nginx 用 `proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for` 带上真实客户端 IP，应用侧由 `server.forward-headers-strategy: framework` 让 `remoteAddr` 取代理链中的真实 IP。**注意这个开关只在受信代理后面才能开**：直连时客户端可以自己伪造该头，等于把限流整个绕过——所以它只写在 `application-prod.yml`，本地开发不启用。
+
+**② SSE 被 Nginx 缓冲成「假流式」**。Nginx 默认开启 `proxy_buffering`，会把上游的事件帧攒在缓冲区里，前端要等整条流结束才一次性收到——接口还是那个接口，流式却名存实亡。为流式周报单独加一个 location：`proxy_buffering off` + `X-Accel-Buffering: no`，并把 `proxy_read_timeout` 放宽到超过后端 `SseEmitter` 的 120 秒超时。
+
+**③ `add_header` 是「全有或全无」的继承**。只要某个 location 里写了任意一条 `add_header`，它就完全不再继承 server 级的响应头——于是入口页 `index.html` 因为要声明 `Cache-Control` 而悄悄丢掉了 `X-Frame-Options`，防点击劫持形同虚设。凡是用到 `add_header` 的 location 都必须把安全头重新声明一遍。
+
+**验证**：`ProxyForwardingIntegrationTest` 用真实 HTTP 打 11 次登录（同一个 `X-Forwarded-For`）断言第 11 次 429，再换一个客户端 IP 断言拿到独立配额——若代理头没生效，第二次请求同样会被 429，用例必红，从而守住①；②③属于配置语义，本机无 Docker，只能静态校验并向读者标注。
+
+### 20. 把「开发默认值」带上生产，等于把认证和监控一起交出去
+
+**现象**：逐项检查生产配置时发现三处「开发很顺手、上线即漏洞」的默认值。
+
+**根因**：
+1. **CORS 通配来源 + `allowCredentials(true)`**：任意网站都能带着用户凭据读取接口数据，等于把浏览器同源保护整个让出去，比不配 CORS 危险得多；
+2. **JWT 密钥有仓库默认值**：HS256 是对称签名，密钥一旦公开，任何人都能自己签发任意 `userId` 的 token 绕过整个认证体系，而且服务端**无法区分真假**——比密码泄露更难补救；
+3. **Actuator 全量暴露 + 端口直发公网**：`/actuator/env` 会把配置项（可能含数据库密码、API Key）原样吐出来；`health` 的 `show-details: always` 暴露数据库与磁盘明细；同时 compose 把 MySQL 3306、无密码 Redis 6379 一起发布到 `0.0.0.0`，未加认证的 Redis 是公网上最常见的被入侵入口。
+
+**方案**（全部收敛到 `application-prod.yml` 与 compose 生产覆盖文件）：
+- CORS 改为可配置来源，**留空即完全不注册跨域规则**——线上 H5 与 `/api` 由同一个 Nginx 提供，本来就是同源，根本不需要 CORS；确需跨域时用 `CORS_ALLOWED_ORIGINS` 显式列举，绝不退化成通配；
+- `prod` profile 下 `jwt.secret` 默认为空，并由 `JwtSecretGuard` 在启动时拒绝「空值 / 仓库默认值 / 短于 32 字节」三种情况，**直接启动失败**而不是打条警告日志——悄悄用一个公开密钥跑在生产上，比启动失败危险得多；compose 侧再用 `${JWT_SECRET:?...}` 让变量缺失时就报错退出；
+- Actuator 只暴露 `health,prometheus`，`show-details: never`，关闭 `info.env`；Nginx 再按来源网段把 `/actuator` 挡在外面（对外返回 404，连「这里有监控端点」都不暴露）；MySQL / Redis / 应用端口统一只绑定 `127.0.0.1`。
+
+**验证**：`JwtSecretGuardTest` 覆盖四种密钥分支，其中一条专门断言「Java 里的默认密钥常量必须与 `application.yml` 一致」——防的是有人改了配置却忘了同步常量，导致自检静默失效；`WebConfigCorsTest` 断言留空时不注册任何规则、配置来源时也绝不出现 `*`。另外以 `prod` profile 真实启动验证：缺 `JWT_SECRET` 与沿用默认值两种情况都启动失败并给出中文原因；启动成功后 `/actuator/metrics`、`/info`、`/env` 均不可用，`health` 不再返回组件明细；带 `Origin` 的请求不返回任何 `Access-Control-Allow-Origin`；同时用 `dev` profile 反向确认这些收紧只作用于生产（本地仍是宽的、`localhost:5173` 仍可跨域）。**过程中还踩了一个验证方法本身的坑**：本项目约定「HTTP 状态码恒为 200，业务状态放在 body.code」，我起初只看 HTTP 状态码，看到 `/actuator/metrics` 返回 200 就以为收紧没生效，实际 body 是 `{"code":404}` —— 在本项目里判断接口是否可用必须看业务码，不能只看 HTTP 状态。
+
 ---
 
 ## 六、本地环境搭建、运行教程
@@ -425,13 +462,20 @@ docker compose up -d --build
 
 包含 MySQL（自动执行 `sql/schema.sql`）、Redis、应用三个服务。停止：`docker compose down`；清空数据重建：`docker compose down -v`。
 
-服务器部署可直接使用 CI 构建并推送到 GHCR 的镜像，无需在服务器上编译：
+服务器部署可直接使用 CI 构建并推送到 GHCR 的镜像，无需在服务器上编译；生产入口是 Nginx（托管 H5 发行包 + 反代 `/api`）：
 
 ```bash
+# 1. 在 HBuilderX 里「发行 → 网站-H5」生成发行包（默认 unpackage/dist/build/h5）
+# 2. 配置生产环境变量（.env 已被 .gitignore 忽略）
 cd pomodoro-server
+cp .env.example .env && vi .env          # 至少填 JWT_SECRET（>= 32 字节随机串）与 MYSQL_PASSWORD
+
+# 3. 拉取 CI 镜像并启动（叠加生产覆盖文件后才会有 Nginx 和 prod profile）
 echo $CR_PAT | docker login ghcr.io -u <GitHub 用户名> --password-stdin
-IMAGE_TAG=latest docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --no-build
+docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --no-build
 ```
+
+生产覆盖文件做了三件事：应用切到 `prod` profile（收紧 Actuator、要求显式密钥、按 `X-Forwarded-For` 还原真实客户端 IP）；`JWT_SECRET` 用 `:?` 声明为必需，缺失则直接报错退出；新增 Nginx 作为唯一对外入口，应用与数据库端口只绑定 `127.0.0.1`。单独执行 `docker compose up -d --build` 则是「本机跑起来看看」的形态，不对外暴露。
 
 > GHCR 包首次推送后默认私有：可在 GitHub 仓库 → Packages → 包设置中改为 Public，或保持私有并在服务器上先 `docker login`。
 
@@ -506,11 +550,14 @@ mvn test
 │   │   ├── common/      # 统一返回、异常、AOP 切面、UTF-8 SSE emitter
 │   │   ├── observability/ # traceId 过滤器 + 业务指标埋点
 │   │   └── ai/          # DeepSeek 客户端
-│   ├── src/test/        # JWT/检索/效率得分单测 + 核心链路、统计边界、SSE、并发、可观测性集成测试
+│   ├── src/test/        # JWT/检索/效率得分单测 + 核心链路、统计边界、SSE、并发、可观测性、反代集成测试
 │   ├── sql/schema.sql   # 建库建表脚本
+│   ├── nginx/nginx.conf # 生产入口：托管 H5 + 反代 /api（SSE 关缓冲）+ 限制 /actuator
 │   ├── observability/   # Prometheus 抓取配置 + Grafana 预置面板
+│   ├── .env.example     # 生产部署必需/可选环境变量示例（.env 不提交）
 │   ├── Dockerfile
 │   ├── docker-compose.yml
+│   ├── docker-compose.prod.yml        # 生产覆盖：GHCR 镜像 + Nginx + prod profile
 │   └── docker-compose.observability.yml
 └── README.md
 ```
@@ -522,8 +569,8 @@ mvn test
 1. **完整的业务闭环**：专注 → 任务归因 → 统计反馈 → AI 洞察 → 激励（积分/成就/排行），不是单点功能 Demo。
 2. **服务端可信计时**：不信任客户端时长，服务端对账 + 上下限校验；前端以服务端时间为锚点，刷新不丢状态。
 3. **可降级架构**：Redis、DeepSeek 都是可选依赖，缺任何一个项目都能完整启动和演示，适合本地/面试环境。
-4. **真实踩坑与修复**：四舍五入导致的负时长、ThreadLocal 泄漏、软删与注销冲突、N+1、并发 401 等问题均有明确定位、修复和回归验证。
-5. **有回归保障**：42 个后端测试，其中 28 个是真实 Spring 上下文 + MySQL 的集成测试，覆盖认证、任务、番茄、统计与日期边界、SSE 流式、导出、数据隔离、AI 降级、限流、幂等、并发竞态与可观测性指标；另有 RAG 检索、效率得分公式、JWT 共 14 个单测。前端离线队列用 Node 模拟 uni storage/request 做了 15 个用例，并用无头 Edge 走通「断网保存 → 联网自动同步」。
+4. **真实踩坑与修复**：四舍五入导致的负时长、ThreadLocal 泄漏、软删与注销冲突、N+1、并发 401、挂机番茄把用户锁死、SSE 中文字节、反代后限流分桶失效、生产默认值即漏洞等问题，均有明确定位、修复和回归验证。
+5. **有回归保障**：50 个后端测试，其中 29 个是真实 Spring 上下文 + MySQL 的集成测试，覆盖认证、任务、番茄、统计与日期边界、SSE 流式、导出、数据隔离、AI 降级、限流、幂等、并发竞态、可观测性指标与反向代理拓扑；另有 RAG 检索、效率得分公式、JWT、生产密钥自检、CORS 收敛共 21 个单测。前端离线队列用 Node 模拟 uni storage/request 做了 15 个用例，并用无头 Edge 走通「断网保存 → 联网自动同步」。
 6. **工程化完整**：统一返回体、全局异常处理、AOP 日志、限流、幂等、定时补偿、Docker Compose 一键部署；GitHub Actions 自动跑测试、构建镜像并发布到 GHCR。
 7. **前端体验**：中英双语（响应式 i18n）、暗黑模式、H5 CSV 直接下载、SSE 流式 AI 输出；GET 接口离线缓存，断网时页面仍可展示最近数据；可安全重放的写操作进入离线队列，联网自动补交，刷新后可恢复进行中的番茄状态。
 8. **可控成本的 AI 问答**：BM25 + 中文 bigram + 时间衰减做历史数据检索，Top 8 / 1800 字符预算控制提示词，无命中自动回退；回答附带引用来源，可解释、可验证。
@@ -539,7 +586,7 @@ mvn test
 3. **统计数据预聚合**：数据量增大后，热力图/月报改为按日预聚合或加覆盖索引，避免范围扫描。
 4. **AI 检索升级**：当前 BM25 已覆盖关键词召回，后续可接入 Embedding / 向量库补足同义词与口语化提问；周报支持异步任务化，避免长连接占用。
 5. **告警与链路追踪**：基于现有指标配置 Prometheus 告警（5xx、AI 降级率、连接池等待），并接入 OpenTelemetry 将 traceId 上报到 Jaeger/Tempo，补足跨服务链路视图与慢 SQL 定位。
-6. **自动化部署**：在 GHCR 镜像发布的基础上，通过 SSH 自动拉取镜像并重启服务（需要配置服务器地址、SSH 密钥等仓库 Secrets）。
+6. **自动化部署与 HTTPS**：在 GHCR 镜像发布的基础上，通过 SSH 自动拉取镜像并重启服务（需要配置服务器地址、SSH 密钥等仓库 Secrets）；对外入口补上 HTTPS 证书与强制跳转，并按 H5 实际产物确定 CSP 白名单后开启（模板已在 `nginx/nginx.conf` 中注释保留）。
 7. **前端工程化**：页面组件拆分、App / 小程序真机联调；离线队列可进一步引入后台同步与冲突提示。
 8. **测试完善**：SSE 流式、统计与日期边界、并发竞态已补齐（42 个用例）；后续可补前端组件级测试，并把前端产物构建纳入 CI（当前 uni-app 由 HBuilderX 构建，暂无 Node 构建链）。
 

@@ -27,9 +27,24 @@ public class JwtUtil {
     public JwtUtil(@Value("${jwt.secret}") String secret,
                    @Value("${jwt.access-expire}") long accessExpire,
                    @Value("${jwt.refresh-expire}") long refreshExpire) {
-        this.key = Keys.hmacShaKeyFor(secret.getBytes(StandardCharsets.UTF_8));
+        this.key = buildKey(secret);
         this.accessExpire = accessExpire;
         this.refreshExpire = refreshExpire;
+    }
+
+    /**
+     * 把配置里的字符串转成签名密钥。
+     * <p>
+     * 空值这里主动拦一道：jjwt 对空密钥抛的是英文的 {@code WeakKeyException}（"The specified key
+     * byte array is 0 bits..."），运维排查时看不出是哪个配置项没填。生产环境还会由
+     * {@link JwtSecretGuard} 进一步拒绝「沿用仓库默认密钥」的情况。
+     */
+    private static SecretKey buildKey(String secret) {
+        if (secret == null || secret.isBlank()) {
+            throw new IllegalStateException(
+                    "jwt.secret 为空：请注入 JWT_SECRET（生产部署见 pomodoro-server/.env.example）");
+        }
+        return Keys.hmacShaKeyFor(secret.getBytes(StandardCharsets.UTF_8));
     }
 
     /** 生成 access token */

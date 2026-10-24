@@ -1,0 +1,45 @@
+# 生产环境覆盖配置：docker-compose.prod.yml 通过 SPRING_PROFILES_ACTIVE=prod 激活。
+#
+# 这里只放「上生产必须与开发不同」的项，其余配置继续继承 application.yml，
+# 避免两套配置各写一半、改一处忘一处。
+
+server:
+  # 部署在 Nginx 之后：真实客户端 IP 由代理通过 X-Forwarded-For 传入。
+  # 必须开，否则所有请求的 remoteAddr 都是 Nginx 容器的 IP，
+  # 「同 IP 登录限流 10 次/分钟」会退化成全站共享一个计数器，正常流量也会被 429。
+  # 反过来说，这个开关只在受信代理后面才能开：直连时客户端可以自己伪造该头来绕过限流。
+  forward-headers-strategy: framework
+
+jwt:
+  # 故意不给默认值：未注入 JWT_SECRET 时直接启动失败（见 JwtSecretGuard），
+  # 避免线上的 token 由仓库里公开的默认密钥签发。
+  secret: ${JWT_SECRET:}
+
+# 生产环境不跨域：H5 静态资源与 /api 由同一个 Nginx 提供，属于同源请求。
+# 留空即不注册任何 CORS 规则（浏览器同源策略本身就会拦住外站）。
+# 若前端确实部署在另一个域名，用 CORS_ALLOWED_ORIGINS 显式列出（逗号分隔）。
+cors:
+  allowed-origins: ${CORS_ALLOWED_ORIGINS:}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        # 只留健康检查与 Prometheus 抓取端点；metrics / info 等一律不对外。
+        # 再配合 Nginx 把 /actuator 限制为内网来源，形成两道锁。
+        include: health,prometheus
+  endpoint:
+    health:
+      # 不再对外暴露数据库、磁盘等组件明细
+      show-details: never
+      probes:
+        enabled: true
+  info:
+    env:
+      # info.env 会把配置项（可能包含数据库密码、API Key 等环境变量）原样暴露出去
+      enabled: false
+
+logging:
+  level:
+    # 生产不再打 DEBUG/SQL 明细，避免日志里出现业务数据与慢查询噪声
+    com.pomodoro: info

@@ -11,7 +11,19 @@ import {
 	clearQueue
 } from './offlineQueue.js'
 
-export const BASE_URL = 'http://localhost:8080' // H5 开发环境；App/小程序发布时改为实际后端地址
+// 后端地址按「端 + 构建模式」解析，避免把域名写死在代码里：
+// - H5 开发：直连本机后端 8080（页面在 5173，属跨域，开发环境已放行该来源）
+// - H5 发行：留空走同源——线上由 Nginx 同时提供页面与 /api，既不用写死域名，
+//   也不会在 HTTPS 站点上去请求 http:// 而被浏览器按混合内容拦掉
+// - App / 小程序：真机访问不到 localhost，打包前必须改成实际后端地址
+// 极性取「只有明确是开发构建才用本地地址」：万一取值异常，宁可让本地开发页面报错暴露，
+// 也不要线上悄悄去请求 localhost:8080——后者在开发机自家后端开着时甚至「看起来是好的」。
+// #ifdef H5
+export const BASE_URL = process.env.NODE_ENV === 'development' ? 'http://localhost:8080' : ''
+// #endif
+// #ifndef H5
+export const BASE_URL = 'http://localhost:8080' // TODO 发布到 App / 小程序前改成实际后端地址
+// #endif
 
 // 刷新 token 进行中的 Promise，并发 401 时共用一个，避免重复刷新
 let refreshing = null
