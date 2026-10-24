@@ -90,6 +90,8 @@
 	import { clearApiCache } from '../../utils/apiCache.js'
 
 	const TOTAL_SECONDS = 25 * 60
+	// 与服务端防作弊上限一致：超过这个时长的番茄无法记为「完成」
+	const MAX_FOCUS_SECONDS = 4 * 60 * 60
 
 	export default {
 		data() {
@@ -165,7 +167,14 @@
 						this.loadTasks()
 						this.loadUser()
 					})
-					.catch(() => {})
+					.catch((err) => {
+						// 超过单次上限（4 小时）时服务端必然拒绝「完成」，而记录仍是 RUNNING，
+						// 新的番茄也开不了——不主动给出出路，用户只会卡在「点完成→报错→再点」的循环里。
+						// 判据用本地已专注时长（计时本就以服务端 startTime 为锚点），不去匹配后端文案。
+						if (err && err.code === 400 && this.elapsedSeconds() > MAX_FOCUS_SECONDS) {
+							this.confirmOvertimeInterrupt()
+						}
+					})
 			},
 			interrupt() {
 				if (!this.pomodoroId) return
@@ -174,14 +183,33 @@
 					content: this.t('interruptContent'),
 					success: (res) => {
 						if (!res.confirm) return
-						interruptPomodoro(this.pomodoroId, '')
-							.then(() => {
-								uni.showToast({ title: this.t('interrupted'), icon: 'none' })
-								this.reset()
-							})
-							.catch(() => {})
+						this.doInterrupt()
 					}
 				})
+			},
+			// 超时番茄的唯一出路：说明原因后一次确认直接中断，不再叠一层「确定中断吗」
+			confirmOvertimeInterrupt() {
+				uni.showModal({
+					title: this.t('overtimeTitle'),
+					content: this.t('overtimeContent'),
+					confirmText: this.t('overtimeConfirm'),
+					success: (res) => {
+						if (!res.confirm) return
+						this.doInterrupt()
+					}
+				})
+			},
+			doInterrupt() {
+				interruptPomodoro(this.pomodoroId, '')
+					.then(() => {
+						uni.showToast({ title: this.t('interrupted'), icon: 'none' })
+						this.reset()
+					})
+					.catch(() => {})
+			},
+			elapsedSeconds() {
+				if (!this.startedAt) return 0
+				return Math.floor((Date.now() - this.startedAt) / 1000)
 			},
 			loadGoal() {
 				getGoal()

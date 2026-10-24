@@ -345,7 +345,9 @@ Actuator（health / info / metrics） + Micrometer 业务埋点
 
 **方案**：把校验的归属分清楚——上限是准入条件，只属于「完成」；「中断」是释放锁的唯一出路，永远不能因为时长异常而失败。`interrupt()` 改为只按实际秒数对账、并把落库时长封顶到 4 小时：既保证一定能释放锁，也不让异常长的记录污染日统计的分钟数。
 
-**验证**：`StatBoundaryIntegrationTest#reconcileBoundsNeverLockTheUserOut` 用 mapper 把 `start_time` 回拨 5 小时，实测「完成」返回 400、`RUNNING` 状态不被破坏；「中断」返回 `INTERRUPTED`、时长恰好封顶 4×3600、日统计单日最多贡献 240 分钟；随后 `start` 立即恢复可用。顺带发现前端在同一场景下点「完成」是静默失败（`catch` 只吞掉错误），用户的正确出路是点「中断」——这类「后端必然拒绝」的路径前端应当给出引导，而不是让用户自己猜。
+**验证**：`StatBoundaryIntegrationTest#reconcileBoundsNeverLockTheUserOut` 用 mapper 把 `start_time` 回拨 5 小时，实测「完成」返回 400、`RUNNING` 状态不被破坏；「中断」返回 `INTERRUPTED`、时长恰好封顶 4×3600、日统计单日最多贡献 240 分钟；随后 `start` 立即恢复可用。
+
+**配套的前端引导**：后端修完，用户仍然不知道该点「中断」——点「完成」只会弹一句「专注时长异常」，然后卡在「点完成 → 报错 → 再点」的循环里（记录一直是 `RUNNING`，新番茄也开不了）。因此首页在 `complete()` 的失败分支里判断「业务 400 + 本地已专注时长超过 4 小时」（判据用本地时长而不是匹配后端文案，避免文案一改就失效），命中则弹窗说明原因并直接把出路给出来，一次确认即记为中断。`uni.showModal` 的确认回调抽成 `doInterrupt()`，与正常中断共用同一条请求链路。**验证**：无头 Edge + CDP 走完整链路——页面内真实点「开始」→ 服务端把 `start_time` 回拨 5 小时 → 刷新后恢复为 `00:00` → 点「完成」弹出说明弹窗（此时记录仍是 `RUNNING`，无终态副作用）→ 点「记为中断」→ 记录变 `INTERRUPTED`、时长封顶 4 小时、`start` 恢复可用，15 项断言全过。
 
 ### 17. SSE 中文乱码：`produces` 修不了它，还可能把前端打成 406
 
