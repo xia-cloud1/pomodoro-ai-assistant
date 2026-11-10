@@ -22,7 +22,8 @@
 </script>
 
 <style>
-	/* 全局主题变量：亮色默认，html.dark 切换暗色 */
+	/* 全局主题变量：亮色默认，html.dark 切换暗色（仅 H5，App/小程序靠下面 page 上的亮色变量） */
+	/* #ifdef H5 */
 	:root {
 		--bg: #f5f6fa;
 		--card: #ffffff;
@@ -51,6 +52,25 @@
 		--primary-light: #262236;
 		--danger: #ff6b6b;
 	}
+	/* #endif */
+	/* #ifndef H5 */
+	/* 小程序不支持 :root（编译产物 app.wxss 会原样输出、选择器匹配不到任何节点），
+	   导致所有 var(--*) 取不到值、连亮色都不对。变量定义在 page 上，H5 仍走上面的 :root。 */
+	page {
+		--bg: #f5f6fa;
+		--card: #ffffff;
+		--text: #333333;
+		--text2: #666666;
+		--text3: #999999;
+		--text4: #bbbbbb;
+		--border: #eeeeee;
+		--border-light: #f5f5f5;
+		--fill: #f0f0f0;
+		--primary: #6b5ce7;
+		--primary-light: #f8f7ff;
+		--danger: #e05050;
+	}
+	/* #endif */
 	page {
 		background-color: var(--bg);
 		color: var(--text);

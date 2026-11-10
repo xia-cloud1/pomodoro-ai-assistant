@@ -421,6 +421,9 @@ export function syncNavTitle() {
 
 export function syncTabBar() {
 	tabBarItems.forEach((it) => {
-		uni.setTabBarItem({ index: it.index, text: t(it.key) })
+		// 非 tabBar 页面（登录页等）调用会 fail，经 promisify 适配器变成 rejection；
+		// 这里只同步文案、不关心结果，吞掉以免污染「页面无 JS 异常」的判断。
+		const r = uni.setTabBarItem({ index: it.index, text: t(it.key) })
+		if (r && typeof r.catch === 'function') r.catch(() => {})
 	})
 }

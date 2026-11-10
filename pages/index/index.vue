@@ -6,11 +6,7 @@
 		</view>
 		<view class="level">Lv.{{ user.level || 0 }} · {{ user.points || 0 }} {{ t('pointsUnit') }}</view>
 
-		<view class="timer">
-			<text class="time">{{ displayTime }}</text>
-			<text class="status">{{ statusText }}</text>
-			<text v-if="running && selectedTaskId" class="running-task">{{ selectedTaskName }}</text>
-		</view>
+		<pomodoro-timer :time="displayTime" :status="statusText" :task-name="runningTaskName" />
 
 		<!-- 关联任务（仅未开始时可选） -->
 		<view v-if="!running" class="task-pick" @click="showTaskPick = true">
@@ -27,58 +23,17 @@
 			</template>
 		</view>
 
-		<!-- 本周目标 -->
-		<view class="goal-card">
-			<view class="goal-head">
-				<text class="goal-label">{{ t('weeklyGoal') }}</text>
-				<text class="goal-edit" @click="openGoal">{{ t('goalEdit') }}</text>
-			</view>
-			<view v-if="goal && goal.targetPomodoros">
-				<view class="goal-nums">
-					<text class="goal-done">{{ goal.achievedPomodoros }}</text>
-					<text class="goal-target">/ {{ goal.targetPomodoros }} {{ t('pomodoroUnit') }}</text>
-					<text class="goal-percent">{{ goal.progressPercent }}%</text>
-				</view>
-				<view class="goal-bar">
-					<view class="goal-bar-inner" :style="{ width: barWidth }"></view>
-				</view>
-				<text class="goal-range">{{ goal.weekStart }} ~ {{ goal.weekEnd }}</text>
-			</view>
-			<text v-else class="goal-empty">{{ t('goalEmpty') }}</text>
-		</view>
+		<goal-card :goal="goal" @edit="openGoal" />
 
 		<!-- 设置目标弹窗 -->
-		<view v-if="showGoal" class="mask" @click="showGoal = false">
-			<view class="dialog" @click.stop>
-				<text class="d-title">{{ t('goalSetTitle') }}</text>
-				<input class="input" v-model="goalTarget" type="number" :placeholder="t('goalTargetPlaceholder')" placeholder-class="ph" />
-				<view class="d-actions">
-					<button class="d-btn cancel" @click="showGoal = false">{{ t('cancel') }}</button>
-					<button class="d-btn ok" @click="saveGoal">{{ t('confirm') }}</button>
-				</view>
-			</view>
-		</view>
+		<mask-dialog :show="showGoal" :title="t('goalSetTitle')" :cancel-text="t('cancel')" :confirm-text="t('confirm')"
+			@close="showGoal = false" @confirm="saveGoal">
+			<input class="input" v-model="goalTarget" type="number" :placeholder="t('goalTargetPlaceholder')" placeholder-class="ph" />
+		</mask-dialog>
 
 		<!-- 关联任务弹窗 -->
-		<view v-if="showTaskPick" class="mask" @click="showTaskPick = false">
-			<view class="dialog" @click.stop>
-				<text class="d-title">{{ t('pickTask') }}</text>
-				<scroll-view scroll-y class="task-list">
-					<view class="task-opt" @click="pickTask(null)">
-						<text class="to-name">{{ t('noTaskOption') }}</text>
-						<text v-if="!selectedTaskId" class="to-check">✓</text>
-					</view>
-					<view v-for="item in tasks" :key="item.id" class="task-opt" @click="pickTask(item.id)">
-						<text class="to-name">{{ item.title }}</text>
-						<text v-if="selectedTaskId === item.id" class="to-check">✓</text>
-					</view>
-					<view v-if="!tasks.length" class="task-empty">{{ t('emptyTask') }}</view>
-				</scroll-view>
-				<view class="d-actions">
-					<button class="d-btn cancel" @click="showTaskPick = false">{{ t('cancel') }}</button>
-				</view>
-			</view>
-		</view>
+		<task-pick-dialog :show="showTaskPick" :tasks="tasks" :selected-id="selectedTaskId"
+			@close="showTaskPick = false" @pick="pickTask" />
 	</view>
 </template>
 
@@ -121,9 +76,10 @@
 				if (this.timerSeconds > 0) return this.t('focusing')
 				return this.t('timeUp')
 			},
-			barWidth() {
-				const p = this.goal ? this.goal.progressPercent || 0 : 0
-				return Math.min(p, 100) + '%'
+			// 只有进行中且关联了任务时才在计时下方显示任务名
+			runningTaskName() {
+				if (!this.running || !this.selectedTaskId) return ''
+				return this.selectedTaskName
 			},
 			selectedTaskName() {
 				if (!this.selectedTaskId) return this.t('noTask')
@@ -352,23 +308,6 @@
 		color: var(--primary);
 		margin-top: 12rpx;
 	}
-	.timer {
-		margin-top: 120rpx;
-		display: flex;
-		flex-direction: column;
-		align-items: center;
-	}
-	.time {
-		font-size: 160rpx;
-		font-weight: bold;
-		color: var(--text);
-		letter-spacing: 4rpx;
-	}
-	.status {
-		font-size: 28rpx;
-		color: var(--text3);
-		margin-top: 20rpx;
-	}
 	.actions {
 		margin-top: 40rpx;
 		display: flex;
@@ -376,11 +315,6 @@
 	}
 	.actions-running {
 		margin-top: 120rpx;
-	}
-	.running-task {
-		font-size: 26rpx;
-		color: var(--primary);
-		margin-top: 14rpx;
 	}
 	.task-pick {
 		display: flex;
@@ -408,35 +342,6 @@
 		color: var(--text4);
 		margin-left: 12rpx;
 	}
-	.task-list {
-		max-height: 560rpx;
-		margin-bottom: 24rpx;
-	}
-	.task-opt {
-		display: flex;
-		align-items: center;
-		padding: 22rpx 0;
-		border-bottom: 1rpx solid var(--border-light);
-	}
-	.to-name {
-		flex: 1;
-		font-size: 30rpx;
-		color: var(--text);
-		overflow: hidden;
-		text-overflow: ellipsis;
-		white-space: nowrap;
-	}
-	.to-check {
-		font-size: 30rpx;
-		color: var(--primary);
-		margin-left: 16rpx;
-	}
-	.task-empty {
-		font-size: 26rpx;
-		color: var(--text4);
-		text-align: center;
-		padding: 40rpx 0;
-	}
 	.btn {
 		flex: 1;
 		border-radius: 16rpx;
@@ -452,93 +357,7 @@
 	.interrupt {
 		background: var(--danger);
 	}
-	.goal-card {
-		margin-top: 80rpx;
-		background: var(--card);
-		border-radius: 20rpx;
-		padding: 28rpx;
-	}
-	.goal-head {
-		display: flex;
-		justify-content: space-between;
-		align-items: center;
-	}
-	.goal-label {
-		font-size: 30rpx;
-		font-weight: bold;
-		color: var(--text);
-	}
-	.goal-edit {
-		font-size: 26rpx;
-		color: var(--primary);
-	}
-	.goal-nums {
-		display: flex;
-		align-items: baseline;
-		margin-top: 20rpx;
-	}
-	.goal-done {
-		font-size: 56rpx;
-		font-weight: bold;
-		color: var(--primary);
-	}
-	.goal-target {
-		font-size: 28rpx;
-		color: var(--text3);
-		margin-left: 10rpx;
-	}
-	.goal-percent {
-		font-size: 28rpx;
-		color: var(--text2);
-		margin-left: auto;
-	}
-	.goal-bar {
-		height: 16rpx;
-		background: var(--border);
-		border-radius: 8rpx;
-		margin-top: 16rpx;
-		overflow: hidden;
-	}
-	.goal-bar-inner {
-		height: 100%;
-		background: var(--primary);
-		border-radius: 8rpx;
-	}
-	.goal-range {
-		font-size: 24rpx;
-		color: var(--text4);
-		margin-top: 12rpx;
-	}
-	.goal-empty {
-		font-size: 26rpx;
-		color: var(--text4);
-		margin-top: 16rpx;
-	}
-	.mask {
-		position: fixed;
-		left: 0;
-		top: 0;
-		right: 0;
-		bottom: 0;
-		background: rgba(0, 0, 0, 0.5);
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		z-index: 10;
-	}
-	.dialog {
-		width: 600rpx;
-		background: var(--card);
-		border-radius: 24rpx;
-		padding: 40rpx;
-	}
-	.d-title {
-		font-size: 34rpx;
-		font-weight: bold;
-		color: var(--text);
-		display: block;
-		margin-bottom: 30rpx;
-	}
+	/* 目标弹窗的输入框由插槽传入，样式留在页面侧 */
 	.input {
 		height: 88rpx;
 		border: 1rpx solid var(--border);
@@ -549,23 +368,5 @@
 	}
 	.ph {
 		color: var(--text4);
-	}
-	.d-actions {
-		display: flex;
-		gap: 20rpx;
-		margin-top: 10rpx;
-	}
-	.d-btn {
-		flex: 1;
-		border-radius: 16rpx;
-		font-size: 30rpx;
-	}
-	.cancel {
-		background: var(--border);
-		color: var(--text2);
-	}
-	.ok {
-		background: var(--primary);
-		color: #fff;
 	}
 </style>

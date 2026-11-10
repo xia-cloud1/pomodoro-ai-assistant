@@ -40,18 +40,13 @@
 
 		<button class="logout" @click="logout">{{ t('logoutBtn') }}</button>
 
-		<!-- 注销确认弹窗 -->
-		<view v-if="showDelete" class="mask" @click="showDelete = false">
-			<view class="dialog" @click.stop>
-				<text class="d-title">{{ t('deleteAccountTitle') }}</text>
-				<text class="d-tip">{{ t('deleteAccountTip') }}</text>
-				<input class="input" v-model="deletePwd" password :placeholder="t('deleteAccountPlaceholder')" placeholder-class="ph" />
-				<view class="d-btns">
-					<button class="d-cancel" @click="showDelete = false">{{ t('cancel') }}</button>
-					<button class="d-ok" @click="confirmDelete">{{ t('confirmDelete') }}</button>
-				</view>
-			</view>
-		</view>
+		<!-- 注销确认弹窗（危险操作：确认按钮红色） -->
+		<mask-dialog :show="showDelete" :title="t('deleteAccountTitle')"
+			:cancel-text="t('cancel')" :confirm-text="t('confirmDelete')" confirm-type="danger"
+			@close="showDelete = false" @confirm="confirmDelete">
+			<text class="d-tip">{{ t('deleteAccountTip') }}</text>
+			<input class="input" v-model="deletePwd" password :placeholder="t('deleteAccountPlaceholder')" placeholder-class="ph" />
+		</mask-dialog>
 	</view>
 </template>
 
@@ -320,54 +315,12 @@
 	.menu-item.danger {
 		color: var(--danger);
 	}
-	.mask {
-		position: fixed;
-		top: 0;
-		left: 0;
-		right: 0;
-		bottom: 0;
-		background: rgba(0, 0, 0, 0.5);
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		z-index: 999;
-	}
-	.dialog {
-		width: 80%;
-		background: var(--card);
-		border-radius: 20rpx;
-		padding: 40rpx 32rpx;
-	}
-	.d-title {
-		font-size: 34rpx;
-		font-weight: bold;
-		color: var(--text);
-		display: block;
-		text-align: center;
-	}
+	/* 注销弹窗的说明文字（弹窗外壳样式已收敛到 components/mask-dialog） */
 	.d-tip {
 		font-size: 26rpx;
 		color: var(--text3);
 		display: block;
 		text-align: center;
 		margin: 16rpx 0 28rpx;
-	}
-	.d-btns {
-		display: flex;
-		gap: 20rpx;
-		margin-top: 8rpx;
-	}
-	.d-btns button {
-		flex: 1;
-		border-radius: 16rpx;
-		font-size: 30rpx;
-	}
-	.d-cancel {
-		background: var(--fill);
-		color: var(--text2);
-	}
-	.d-ok {
-		background: var(--danger);
-		color: var(--card);
 	}
 </style>
