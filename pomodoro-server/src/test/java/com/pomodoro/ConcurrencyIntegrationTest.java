@@ -70,6 +70,7 @@ class ConcurrencyIntegrationTest {
 
     private Long userId;
     private String token;
+    private String refreshToken;
 
     @BeforeEach
     void setUp() throws Exception {
@@ -86,6 +87,7 @@ class ConcurrencyIntegrationTest {
         assertEquals(SUCCESS, login.path("code").asInt());
         userId = login.path("data").path("user").path("id").asLong();
         token = login.path("data").path("accessToken").asText();
+        refreshToken = login.path("data").path("refreshToken").asText();
         assertNotNull(token);
     }
 
@@ -138,6 +140,46 @@ class ConcurrencyIntegrationTest {
 
         JsonNode status = getJson("/api/checkin/status", token);
         assertTrue(status.path("data").path("checkedToday").asBoolean());
+    }
+
+    /**
+     * 8 线程同时用同一个 refresh token 刷新：只有 1 个轮换成功，其余全部 401。
+     * 消费必须是原子操作——Redis 模式靠 GETDEL、降级模式靠进程内集合的 putIfAbsent，
+     * 两种实现都保证单赢者；如果「先 GET 再 DELETE」，8 个请求会全部通过校验并各自签出
+     * 新 token，白名单同时承认 8 个「有效」refresh，轮换形同虚设。
+     */
+    @Test
+    void concurrentRefreshOnlyRotatesOnce() throws Exception {
+        ExecutorService pool = Executors.newFixedThreadPool(THREADS);
+        CyclicBarrier barrier = new CyclicBarrier(THREADS);
+        try {
+            List<Future<JsonNode>> futures = new ArrayList<>();
+            for (int i = 0; i < THREADS; i++) {
+                futures.add(pool.submit(() -> {
+                    barrier.await(5, TimeUnit.SECONDS);
+                    return postJson("/api/auth/refresh", Map.of("refreshToken", refreshToken), null, null);
+                }));
+            }
+            int successCount = 0;
+            String rotated = null;
+            for (Future<JsonNode> future : futures) {
+                JsonNode node = future.get(30, TimeUnit.SECONDS);
+                if (node.path("code").asInt() == SUCCESS) {
+                    successCount++;
+                    rotated = node.path("data").path("refreshToken").asText();
+                } else {
+                    assertEquals(401, node.path("code").asInt());
+                }
+            }
+            assertEquals(1, successCount, "同一 refresh token 并发刷新只应有一个赢者");
+            assertNotNull(rotated);
+
+            // 唯一赢者拿到的新 token 仍可正常续用
+            JsonNode next = postJson("/api/auth/refresh", Map.of("refreshToken", rotated), null, null);
+            assertEquals(SUCCESS, next.path("code").asInt());
+        } finally {
+            pool.shutdownNow();
+        }
     }
 
     /** 用 CyclicBarrier 让所有线程尽量同一时刻发起请求 */

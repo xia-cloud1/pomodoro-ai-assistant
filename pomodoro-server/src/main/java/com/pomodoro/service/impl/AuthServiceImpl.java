@@ -102,19 +102,27 @@ public class AuthServiceImpl implements AuthService {
             throw new BusinessException(ResultCode.UNAUTHORIZED, "refreshToken 无效");
         }
 
-        // 3. 白名单校验（Redis 不可用自动降级为无状态通过）
-        if (!refreshTokenStore.validate(jti, userId)) {
+        // 3. 白名单校验并一次性消费（轮换）：通过后旧 jti 立即失效。
+        //    泄露场景下攻击者抢先把旧 token 用掉，受害者下次刷新会被拒、被迫重新登录，
+        //    泄露可被感知；「已失效」不区分重放/吊销/伪造，避免给攻击者反馈
+        if (!refreshTokenStore.consume(jti, userId)) {
             throw new BusinessException(ResultCode.UNAUTHORIZED, "refreshToken 已失效，请重新登录");
         }
 
-        // 4. 确认用户仍存在，签发新 access token
+        // 4. 确认用户仍存在
         User user = userMapper.selectById(userId);
         if (user == null) {
             throw new BusinessException(ResultCode.UNAUTHORIZED, "用户不存在");
         }
 
+        // 5. 签发新 access token，并轮换 refresh：新 jti 重新入白名单。
+        //    白名单按 jti 独立存储，所以是多设备各转各的，轮换一台不会踢掉其他设备
+        String newJti = UUID.randomUUID().toString();
+        refreshTokenStore.save(newJti, userId);
+
         RefreshVO vo = new RefreshVO();
         vo.setAccessToken(jwtUtil.generateAccessToken(user.getId(), user.getUsername()));
+        vo.setRefreshToken(jwtUtil.generateRefreshToken(user.getId(), newJti));
         return vo;
     }
 }

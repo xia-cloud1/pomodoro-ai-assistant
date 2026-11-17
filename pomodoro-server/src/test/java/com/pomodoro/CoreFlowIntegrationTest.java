@@ -21,6 +21,8 @@ import java.time.LocalDateTime;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -77,6 +79,19 @@ class CoreFlowIntegrationTest {
         JsonNode refreshed = postJson("/api/auth/refresh", Map.of("refreshToken", refreshToken), null);
         assertEquals(SUCCESS, refreshed.path("code").asInt());
         assertTrue(refreshed.path("data").path("accessToken").asText().length() > 0);
+
+        // 轮换：响应应附带签名不同的新 refresh token，而不是原样返回旧的
+        String rotated = refreshed.path("data").path("refreshToken").asText();
+        assertFalse(rotated.isEmpty());
+        assertNotEquals(refreshToken, rotated);
+
+        // 旧 token 复用必须被拒（用后即吊销），新 token 可继续轮换，换出的 access 真实可用
+        JsonNode replay = postJson("/api/auth/refresh", Map.of("refreshToken", refreshToken), null);
+        assertEquals(401, replay.path("code").asInt());
+        JsonNode second = postJson("/api/auth/refresh", Map.of("refreshToken", rotated), null);
+        assertEquals(SUCCESS, second.path("code").asInt());
+        JsonNode withNewAccess = getJson("/api/goal", second.path("data").path("accessToken").asText());
+        assertEquals(SUCCESS, withNewAccess.path("code").asInt());
     }
 
     @Test
